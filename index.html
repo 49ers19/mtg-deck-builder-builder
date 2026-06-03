@@ -150,6 +150,19 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .scan-actions{display:flex;flex-direction:column;gap:9px}
 .scan-input{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:11px;color:var(--text);font-size:15px}
 .scan-input:focus{outline:none;border-color:var(--accent)}
+
+/* Commander slot */
+.cmd-panel{border-color:var(--accent)}
+.cmd-card{display:flex;gap:11px;align-items:center}
+.cmd-card .thumb{width:46px;height:64px;border-radius:6px;background:var(--bg2) center/cover;border:1px solid var(--accent);flex-shrink:0}
+.cmd-card .info{flex:1;min-width:0}
+.cmd-card .nm{font-weight:700;font-size:14px}
+.cmd-card .meta{font-size:11px;color:var(--muted);margin-top:2px}
+.cmd-empty{display:flex;align-items:center;gap:12px;border:1.5px dashed var(--accent);background:rgba(201,162,39,.06);cursor:pointer}
+.cmd-empty .cmd-plus{width:42px;height:42px;border-radius:10px;background:rgba(201,162,39,.15);color:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;flex-shrink:0}
+.cmd-empty .nm{font-weight:700;font-size:14px}
+.pick-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(201,162,39,.12);border:1px solid var(--accent);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:13px}
+.pick-banner button{margin-left:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--text)}
 </style>
 </head>
 <body>
@@ -243,7 +256,8 @@ async function scrySearch(q){
   if(!q.trim()){ state.searchResults=[]; if(state.tab==='search') render(); return; }
   setSearchLoading(true);
   try{
-    const r = await fetch('https://api.scryfall.com/cards/search?unique=cards&order=name&q='+encodeURIComponent(q));
+    const query = state.pickCommanderFor ? '('+q+') is:commander' : q;
+    const r = await fetch('https://api.scryfall.com/cards/search?unique=cards&order=name&q='+encodeURIComponent(query));
     if(seq!==searchSeq) return; // stale
     if(r.status===404){ state.searchResults=[]; }
     else{ const d = await r.json(); state.searchResults = (d.data||[]).slice(0,40); }
@@ -270,15 +284,16 @@ function render(){
 // ---------- DECKS LIST ----------
 function deckColorCounts(deck){
   const counts={W:0,U:0,B:0,R:0,G:0,C:0}; let total=0;
-  for(const id in deck.cards){
-    const c=card(id); if(!c) continue;
-    const q=deck.cards[id];
+  const tally=(id,q)=>{
+    const c=card(id); if(!c) return;
     const cols=c.colors&&c.colors.length?c.colors:['C'];
     cols.forEach(col=>{counts[col]=(counts[col]||0)+q; total+=q;});
-  }
+  };
+  for(const id in deck.cards) tally(id, deck.cards[id]);
+  if(deck.commander) tally(deck.commander, 1);
   return {counts,total};
 }
-function deckCardCount(deck){ let n=0; for(const id in deck.cards) n+=deck.cards[id]; return n; }
+function deckCardCount(deck){ let n=deck.commander?1:0; for(const id in deck.cards) n+=deck.cards[id]; return n; }
 
 function renderDecks(){
   let h = `<div class="row between" style="margin-bottom:14px">
@@ -295,10 +310,12 @@ function renderDecks(){
       const n=deckCardCount(d);
       const bar = total? Object.keys(counts).filter(k=>counts[k]).map(k=>
         `<i style="width:${(counts[k]/total*100).toFixed(1)}%;background:var(--${k})"></i>`).join('') : '<i style="width:100%;background:var(--line)"></i>';
+      const cmd = d.commander && card(d.commander);
+      const sub = cmd ? `👑 ${esc(cmd.name)} · ${n} cards` : `${d.format||'Casual'} · ${n} card${n===1?'':'s'}`;
       h += `<div class="decktile" onclick="openDeck('${d.id}')">
         <div class="col">
           <div class="dn">${esc(d.name)}</div>
-          <div class="ds">${d.format||'Casual'} · ${n} card${n===1?'':'s'}</div>
+          <div class="ds">${sub}</div>
           <div class="colorbar">${bar}</div>
         </div>
         <div style="font-size:22px;color:var(--muted)">›</div>
@@ -331,11 +348,37 @@ function renderDeckDetail(){
   // group cards by type
   const groups = groupDeckCards(d);
 
+  // commander slot (Commander format only)
+  let commanderHTML = '';
+  if(d.format==='Commander'){
+    if(d.commander){
+      const cc=card(d.commander);
+      commanderHTML = `<div class="panel cmd-panel">
+        <div class="section-title" style="margin-top:0">Commander</div>
+        <div class="cmd-card">
+          <div class="thumb" style="background-image:url('${cc?cc.thumb:''}')" onclick="showCard('${d.commander}')"></div>
+          <div class="info" onclick="showCard('${d.commander}')">
+            <div class="nm">${cc?esc(cc.name):'—'} ${cc?pips(cc.colors&&cc.colors.length?cc.colors:['C']):''}</div>
+            <div class="meta">${cc?esc(shortType(cc.type_line)):''}</div>
+          </div>
+          <button class="btn ghost sm" onclick="startPickCommander('${d.id}')">Change</button>
+          <button class="iconbtn" onclick="removeCommander('${d.id}')">✕</button>
+        </div>
+      </div>`;
+    } else {
+      commanderHTML = `<div class="panel cmd-empty" onclick="startPickCommander('${d.id}')">
+        <div class="cmd-plus">＋</div>
+        <div><div class="nm">Set your commander</div><div class="tiny muted">Pick the legendary creature that leads this deck</div></div>
+      </div>`;
+    }
+  }
+
   let h = `<div class="detail-head">
       <button class="back" onclick="closeDeck()">‹</button>
       <div class="ttl">${esc(d.name)}</div>
       <button class="iconbtn" onclick="openDeckModal('${d.id}')">✎</button>
     </div>
+    ${commanderHTML}
     <div class="statgrid">
       <div class="stat"><div class="v">${n}</div><div class="l">Cards</div></div>
       <div class="stat"><div class="v">${lands}</div><div class="l">Lands</div></div>
@@ -414,12 +457,19 @@ function manaText(m){ return m? m.replace(/[{}]/g,'').replace(/\//g,'/') || '—
 
 // ---------- SEARCH ----------
 function renderSearch(){
-  let h = `<div class="search-wrap">
-      <input id="searchInput" placeholder="Search cards, e.g. lightning bolt" value="${esc(state.searchQuery)}" autocomplete="off">
+  const picking = state.pickCommanderFor ? state.decks.find(x=>x.id===state.pickCommanderFor) : null;
+  let h = '';
+  if(picking){
+    h += `<div class="pick-banner">👑 Choosing commander for <b>${esc(picking.name)}</b><button onclick="cancelPickCommander()">Cancel</button></div>`;
+  }
+  h += `<div class="search-wrap">
+      <input id="searchInput" placeholder="${picking?'Search for a commander…':'Search cards, e.g. lightning bolt'}" value="${esc(state.searchQuery)}" autocomplete="off">
       <div id="searchSpin" class="spin hidden"></div>
     </div>`;
   if(!state.searchQuery.trim()){
-    h += `<div class="empty"><div class="big">🔍</div><div class="t">Search Scryfall</div>
+    h += picking
+      ? `<div class="empty"><div class="big">👑</div><div class="t">Find your commander</div><div class="tiny">Search a legendary creature's name — only cards that can be commanders will show.</div></div>`
+      : `<div class="empty"><div class="big">🔍</div><div class="t">Search Scryfall</div>
       <div class="tiny">Try a name, or <b>t:dragon</b>, <b>c:rg</b>, <b>cmc=3</b>.<br>Powered by the Scryfall API.</div></div>`;
   } else if(!state.searchResults.length){
     h += `<div class="empty"><div class="big">🤔</div><div class="t">No results</div><div class="tiny">Check spelling or try a broader query.</div></div>`;
@@ -432,7 +482,7 @@ function renderSearch(){
           <div class="nm">${esc(c.name)} ${pips(c.colors&&c.colors.length?c.colors:(c.color_identity||[]))}</div>
           <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}</div>
         </div>
-        <button class="btn gold sm" onclick="addMenu('${c.id}')">Add</button>
+        <button class="btn gold sm" onclick="${picking?`setCommander('${picking.id}','${c.id}')`:`addMenu('${c.id}')`}">${picking?'Set':'Add'}</button>
       </div>`;
     });
   }
@@ -479,9 +529,29 @@ function renderCollection(){
 // ============================================================
 //  ACTIONS
 // ============================================================
-function setTab(t){ state.tab=t; state.openDeckId=null; render(); if(t==='search') setTimeout(()=>$('#searchInput')?.focus(),50); }
+function setTab(t){ state.pickCommanderFor=null; state.tab=t; state.openDeckId=null; render(); if(t==='search') setTimeout(()=>$('#searchInput')?.focus(),50); }
 function openDeck(id){ state.openDeckId=id; render(); }
 function closeDeck(){ state.openDeckId=null; render(); }
+
+// ---------- Commander slot ----------
+function startPickCommander(deckId){
+  state.pickCommanderFor=deckId; state.openDeckId=deckId; state.tab='search';
+  state.searchQuery=''; state.searchResults=[];
+  render(); setTimeout(()=>$('#searchInput')?.focus(),60);
+}
+function setCommander(deckId,cardId){
+  const c=state._resultMap&&state._resultMap[cardId]; if(c) cacheCard(c);
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  if(d.cards[cardId]) delete d.cards[cardId]; // commander lives in the command zone, not the 99
+  d.commander=cardId;
+  state.pickCommanderFor=null; state.tab='decks';
+  DB.save(); toast('Commander set'); render();
+}
+function removeCommander(deckId){
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  d.commander=null; DB.save(); renderDeckDetail();
+}
+function cancelPickCommander(){ state.pickCommanderFor=null; state.tab='decks'; render(); }
 
 function deckQty(deckId,cardId,delta){
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
@@ -548,10 +618,12 @@ function saveDeck(editId){
   const format=$('#mDeckFormat').value;
   if(editId){
     const d=state.decks.find(x=>x.id===editId); d.name=name; d.format=format;
+    DB.save(); closeModal(); render();
   } else {
     const id=uid(); state.decks.push({id,name,format,cards:{}}); state.openDeckId=id;
+    DB.save(); closeModal();
+    if(format==='Commander'){ startPickCommander(id); } else { render(); }
   }
-  DB.save(); closeModal(); render();
 }
 function deleteDeck(id){
   if(!confirm('Delete this deck? This cannot be undone.')) return;
@@ -768,7 +840,8 @@ document.querySelectorAll('nav button').forEach(b=>{
 // expose for inline handlers
 Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQty,collQty,
   addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,
-  openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss});
+  openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,
+  startPickCommander,setCommander,removeCommander,cancelPickCommander});
 
 render();
 
