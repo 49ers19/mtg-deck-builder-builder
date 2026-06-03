@@ -165,6 +165,11 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .pick-banner button{margin-left:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--text)}
 .imp-text{width:100%;min-height:150px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:11px;color:var(--text);font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;line-height:1.55}
 .imp-text:focus{outline:none;border-color:var(--accent)}
+.precon-list{max-height:210px;overflow-y:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;margin-top:7px;background:var(--bg2)}
+.precon-row{display:flex;width:100%;text-align:left;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;background:none;color:var(--text)}
+.precon-row span:first-child{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.precon-row:last-child{border-bottom:none}
+.precon-row:active{background:var(--panel2)}
 
 /* Play / life counter */
 .play-ctrl{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px}
@@ -772,8 +777,24 @@ function removeCommander(deckId){
 }
 function cancelPickCommander(){ state.pickCommanderFor=null; state.tab='decks'; render(); }
 
-// ---------- Official precons (one-tap load) ----------
-const PRECONS = [
+// ---------- Official precons (loaded from precons.json; seed = offline fallback) ----------
+let PRECONS = [];
+async function loadPrecons(){
+  if(PRECONS.length) return;
+  try{ const r=await fetch('precons.json'); if(r.ok) PRECONS=await r.json(); }catch(e){}
+  if(!PRECONS.length) PRECONS=PRECONS_SEED;
+}
+function renderPreconList(q){
+  const el=$('#preconList'); if(!el) return;
+  if(!PRECONS.length){ el.innerHTML='<div class="tiny muted" style="padding:9px">Couldn’t load precons (needs internet the first time).</div>'; return; }
+  q=(q||'').toLowerCase().trim();
+  const rows=[];
+  for(let i=0;i<PRECONS.length && rows.length<60;i++){
+    if(!q || PRECONS[i].name.toLowerCase().includes(q)) rows.push(`<button class="precon-row" onclick="loadPrecon(${i})"><span>🏰 ${esc(PRECONS[i].name)}</span><span class="tiny muted">${esc(PRECONS[i].set||'')}</span></button>`);
+  }
+  el.innerHTML = rows.join('') || '<div class="tiny muted" style="padding:9px">No precon matches.</div>';
+}
+const PRECONS_SEED = [
   {
     name: 'The Hosts of Mordor',
     set: 'LTR',
@@ -873,21 +894,21 @@ function openImport(){
   const formats=['Commander','Standard','Modern','Pioneer','Pauper','Legacy','Casual','Limited'];
   modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
     <div class="modal">
-      <h3>Import a deck list</h3>
-      <div class="field"><label>Quick-load an official precon</label>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          ${PRECONS.map((p,i)=>`<button class="btn sm" onclick="loadPrecon(${i})">🏰 ${esc(p.name)}</button>`).join('')}
-        </div></div>
-      <div style="text-align:center;color:var(--muted);font-size:11px;margin:0 0 12px">— or paste your own list —</div>
-      <div class="field"><label>Deck name</label><input id="impName" placeholder="e.g. Atraxa Precon" autocomplete="off"></div>
+      <h3>Load or import a deck</h3>
+      <div class="field"><label>Load an official precon</label>
+        <input id="preconSearch" class="scan-input" placeholder="Search 180+ precons by name…" autocomplete="off">
+        <div id="preconList" class="precon-list"><div class="tiny muted" style="padding:9px">Loading precons…</div></div>
+      </div>
+      <div style="text-align:center;color:var(--muted);font-size:11px;margin:8px 0 12px">— or paste your own list —</div>
+      <div class="field"><label>Deck name</label><input id="impName" placeholder="e.g. My Brew" autocomplete="off"></div>
       <div class="field"><label>Format</label><select id="impFormat">${formats.map(f=>`<option ${f==='Commander'?'selected':''}>${f}</option>`).join('')}</select></div>
       <div class="field"><label>Paste the list — one card per line (e.g. “1 Sol Ring”)</label>
-        <textarea id="impText" class="imp-text" placeholder="1 Atraxa, Praetors' Voice&#10;1 Sol Ring&#10;1 Arcane Signet&#10;..." autocomplete="off"></textarea></div>
+        <textarea id="impText" class="imp-text" placeholder="1 Sol Ring&#10;1 Arcane Signet&#10;..." autocomplete="off"></textarea></div>
       <div id="impStatus" class="tiny muted" style="margin-bottom:10px"></div>
-      <button class="btn gold full" onclick="runImport()">Import deck</button>
+      <button class="btn gold full" onclick="runImport()">Import pasted list</button>
       <button class="btn ghost full" style="margin-top:7px" onclick="closeModal()">Cancel</button>
     </div></div>`;
-  setTimeout(()=>$('#impText')?.focus(),60);
+  loadPrecons().then(()=>{ const s=$('#preconSearch'); if(s) s.oninput=e=>renderPreconList(e.target.value); renderPreconList(''); });
 }
 
 function parseDeckList(text){

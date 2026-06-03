@@ -1,7 +1,7 @@
 // Planar Deckbox service worker — caches the app shell so it works offline once installed.
-const CACHE = 'deckbox-v1';
+const CACHE = 'deckbox-v2';
 const SHELL = [
-  './', './index.html', './manifest.webmanifest',
+  './', './index.html', './manifest.webmanifest', './precons.json',
   './icon-192.png', './icon-512.png', './apple-touch-icon.png'
 ];
 
