@@ -181,6 +181,15 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .lifebtn:active{transform:scale(.94)}
 .prow5{display:flex;gap:10px;margin-top:10px}
 .prow5 .lifebtn{flex:1;padding:9px;font-size:14px}
+.counters{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px;padding-top:11px;border-top:1px solid var(--line)}
+.ctr{display:flex;align-items:center;gap:3px;background:var(--bg2);border:1px solid var(--line);border-radius:9px;padding:3px 4px}
+.ctr.cmd{border-color:var(--c)}
+.ctr-lbl{font-size:11px;font-weight:700;color:var(--muted);padding:0 3px}
+.ctr.cmd .ctr-lbl{color:var(--c)}
+.ctr button{width:24px;height:24px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--text);font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center}
+.ctr-n{min-width:18px;text-align:center;font-weight:700;font-size:14px}
+.ctr.danger{border-color:var(--danger)}
+.ctr.danger .ctr-n{color:var(--danger)}
 </style>
 </head>
 <body>
@@ -235,7 +244,7 @@ const state = {
   openDeckId: null,
   searchResults: [],
   searchQuery: '',
-  play: { count:2, start:40, life:[40,40] },
+  play: { count:2, start:40, life:[40,40], poison:[0,0], cmd:[[0,0],[0,0]] },
 };
 
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -553,6 +562,13 @@ function renderCollection(){
 
 // ---------- PLAY (life counter) ----------
 const PLAY_COLORS=['#e3c14b','#aae0fa','#f9a98a','#9bd6a3'];
+function playOut(i){
+  const p=state.play;
+  if((p.life[i]||0)<=0) return 'life';
+  if(((p.poison&&p.poison[i])||0)>=10) return 'poison';
+  if((p.cmd[i]||[]).some(v=>v>=21)) return 'cmdr';
+  return null;
+}
 function renderPlay(){
   const p=state.play;
   let h=`<div class="play-ctrl">
@@ -561,9 +577,22 @@ function renderPlay(){
       <button class="btn sm" onclick="resetLife()">↺ Reset</button>
     </div>`;
   for(let i=0;i<p.count;i++){
-    const v=p.life[i]; const col=PLAY_COLORS[i];
-    h+=`<div class="pcard" style="border-color:${col}${v<=0?';opacity:.6':''}">
-      <div class="pname" style="color:${col}">Player ${i+1}${v<=0?' · OUT':''}</div>
+    const v=p.life[i]; const col=PLAY_COLORS[i]; const out=playOut(i);
+    const outLbl=out?` · OUT${out==='poison'?' ☠':out==='cmdr'?' ⚔':''}`:'';
+    let ctr=`<div class="ctr poison ${((p.poison&&p.poison[i])||0)>=10?'danger':''}">
+        <span class="ctr-lbl">☠</span>
+        <button onclick="poison(${i},-1)">−</button><span class="ctr-n">${(p.poison&&p.poison[i])||0}</span><button onclick="poison(${i},1)">＋</button>
+      </div>`;
+    for(let j=0;j<p.count;j++){
+      if(j===i) continue;
+      const dmg=(p.cmd[i]&&p.cmd[i][j])||0;
+      ctr+=`<div class="ctr cmd ${dmg>=21?'danger':''}" style="--c:${PLAY_COLORS[j]}">
+        <span class="ctr-lbl">⚔P${j+1}</span>
+        <button onclick="cmdDmg(${i},${j},-1)">−</button><span class="ctr-n">${dmg}</span><button onclick="cmdDmg(${i},${j},1)">＋</button>
+      </div>`;
+    }
+    h+=`<div class="pcard" style="border-color:${col}${out?';opacity:.6':''}">
+      <div class="pname" style="color:${col}">Player ${i+1}${outLbl}</div>
       <div class="prow">
         <button class="lifebtn big" onclick="life(${i},-1)">−</button>
         <div class="lifeval" style="${v<=0?'color:var(--danger)':''}">${v}</div>
@@ -573,14 +602,30 @@ function renderPlay(){
         <button class="lifebtn" onclick="life(${i},-5)">−5</button>
         <button class="lifebtn" onclick="life(${i},5)">+5</button>
       </div>
+      <div class="counters">${ctr}</div>
     </div>`;
   }
   main.innerHTML=h;
 }
 function setPlayers(n){ state.play.count=n; resetLife(); }
 function setStart(s){ state.play.start=s; resetLife(); }
-function resetLife(){ const p=state.play; p.life=Array.from({length:p.count},()=>p.start); renderPlay(); }
+function resetLife(){
+  const p=state.play, n=p.count;
+  p.life=Array.from({length:n},()=>p.start);
+  p.poison=Array.from({length:n},()=>0);
+  p.cmd=Array.from({length:n},()=>Array.from({length:n},()=>0));
+  renderPlay();
+}
 function life(i,d){ state.play.life[i]=(state.play.life[i]||0)+d; renderPlay(); }
+function poison(i,d){ const a=state.play.poison; a[i]=Math.max(0,(a[i]||0)+d); renderPlay(); }
+function cmdDmg(i,j,d){
+  const p=state.play;
+  if(!p.cmd[i]) p.cmd[i]=Array.from({length:p.count},()=>0);
+  const cur=p.cmd[i][j]||0, nv=Math.max(0,cur+d), applied=nv-cur;
+  p.cmd[i][j]=nv;
+  p.life[i]=(p.life[i]||0)-applied; // commander damage is combat damage — also lowers life
+  renderPlay();
+}
 
 // ============================================================
 //  ACTIONS
@@ -1105,7 +1150,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   openImport,runImport,loadPrecon,
-  setPlayers,setStart,resetLife,life});
+  setPlayers,setStart,resetLife,life,poison,cmdDmg});
 
 render();
 
