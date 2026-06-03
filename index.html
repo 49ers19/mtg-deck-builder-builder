@@ -165,6 +165,22 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .pick-banner button{margin-left:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--text)}
 .imp-text{width:100%;min-height:150px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:11px;color:var(--text);font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;line-height:1.55}
 .imp-text:focus{outline:none;border-color:var(--accent)}
+
+/* Play / life counter */
+.play-ctrl{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px}
+.pc-group{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:5px 8px}
+.pc-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-right:2px}
+.pc-btn{min-width:30px;padding:6px 9px;border-radius:7px;background:var(--panel2);border:1px solid var(--line);color:var(--text);font-weight:700;font-size:13px}
+.pc-btn.on{background:linear-gradient(180deg,var(--accent2),var(--accent));color:#23200a;border-color:var(--accent)}
+.pcard{background:var(--panel);border:1.5px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+.pname{font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;text-align:center}
+.prow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.lifeval{font-family:'Cinzel',serif;font-weight:700;font-size:54px;line-height:1;min-width:90px;text-align:center}
+.lifebtn{background:var(--panel2);border:1px solid var(--line);border-radius:12px;color:var(--text);font-weight:700;transition:transform .05s}
+.lifebtn.big{width:62px;height:62px;font-size:30px;flex-shrink:0}
+.lifebtn:active{transform:scale(.94)}
+.prow5{display:flex;gap:10px;margin-top:10px}
+.prow5 .lifebtn{flex:1;padding:9px;font-size:14px}
 </style>
 </head>
 <body>
@@ -179,6 +195,7 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
   <button data-tab="decks" class="active"><span class="ic">🗂️</span>Decks</button>
   <button data-tab="search"><span class="ic">🔍</span>Search</button>
   <button data-tab="collection"><span class="ic">📚</span>Collection</button>
+  <button data-tab="play"><span class="ic">⚔️</span>Play</button>
 </nav>
 
 <div id="modalRoot"></div>
@@ -218,6 +235,7 @@ const state = {
   openDeckId: null,
   searchResults: [],
   searchQuery: '',
+  play: { count:2, start:40, life:[40,40] },
 };
 
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -278,8 +296,9 @@ function render(){
   if(state.tab==='decks') state.openDeckId ? renderDeckDetail() : renderDecks();
   else if(state.tab==='search') renderSearch();
   else if(state.tab==='collection') renderCollection();
+  else if(state.tab==='play') renderPlay();
   $('#subtitle').textContent = ({
-    decks:'Your decks', search:'Find cards on Scryfall', collection:'Cards you own'
+    decks:'Your decks', search:'Find cards on Scryfall', collection:'Cards you own', play:'Life counter'
   })[state.tab] || '';
 }
 
@@ -531,6 +550,37 @@ function renderCollection(){
   }
   main.innerHTML = h;
 }
+
+// ---------- PLAY (life counter) ----------
+const PLAY_COLORS=['#e3c14b','#aae0fa','#f9a98a','#9bd6a3'];
+function renderPlay(){
+  const p=state.play;
+  let h=`<div class="play-ctrl">
+      <div class="pc-group"><span class="pc-lbl">Players</span>${[2,3,4].map(n=>`<button class="pc-btn ${p.count===n?'on':''}" onclick="setPlayers(${n})">${n}</button>`).join('')}</div>
+      <div class="pc-group"><span class="pc-lbl">Life</span>${[20,40].map(s=>`<button class="pc-btn ${p.start===s?'on':''}" onclick="setStart(${s})">${s}</button>`).join('')}</div>
+      <button class="btn sm" onclick="resetLife()">↺ Reset</button>
+    </div>`;
+  for(let i=0;i<p.count;i++){
+    const v=p.life[i]; const col=PLAY_COLORS[i];
+    h+=`<div class="pcard" style="border-color:${col}${v<=0?';opacity:.6':''}">
+      <div class="pname" style="color:${col}">Player ${i+1}${v<=0?' · OUT':''}</div>
+      <div class="prow">
+        <button class="lifebtn big" onclick="life(${i},-1)">−</button>
+        <div class="lifeval" style="${v<=0?'color:var(--danger)':''}">${v}</div>
+        <button class="lifebtn big" onclick="life(${i},1)">＋</button>
+      </div>
+      <div class="prow5">
+        <button class="lifebtn" onclick="life(${i},-5)">−5</button>
+        <button class="lifebtn" onclick="life(${i},5)">+5</button>
+      </div>
+    </div>`;
+  }
+  main.innerHTML=h;
+}
+function setPlayers(n){ state.play.count=n; resetLife(); }
+function setStart(s){ state.play.start=s; resetLife(); }
+function resetLife(){ const p=state.play; p.life=Array.from({length:p.count},()=>p.start); renderPlay(); }
+function life(i,d){ state.play.life[i]=(state.play.life[i]||0)+d; renderPlay(); }
 
 // ============================================================
 //  ACTIONS
@@ -1054,7 +1104,8 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
-  openImport,runImport,loadPrecon});
+  openImport,runImport,loadPrecon,
+  setPlayers,setStart,resetLife,life});
 
 render();
 
