@@ -266,6 +266,7 @@ const state = {
   searchQuery: '',
   play: { count:2, start:40, life:[40,40], poison:[0,0], cmd:[[0,0],[0,0]], mode:'life' },
   game: null,
+  session: null,
 };
 
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -605,6 +606,7 @@ function lifeCounterHTML(){
       <div class="pc-group"><span class="pc-lbl">Players</span>${[2,3,4].map(n=>`<button class="pc-btn ${p.count===n?'on':''}" onclick="setPlayers(${n})">${n}</button>`).join('')}</div>
       <div class="pc-group"><span class="pc-lbl">Life</span>${[20,40].map(s=>`<button class="pc-btn ${p.start===s?'on':''}" onclick="setStart(${s})">${s}</button>`).join('')}</div>
       <button class="btn sm" onclick="resetLife()">↺ Reset</button>
+      <button class="btn sm ${state.session?'gold':''}" onclick="openShare()">🔗 ${state.session?'Room '+state.session.code:'Share'}</button>
     </div>`;
   for(let i=0;i<p.count;i++){
     const v=p.life[i]; const col=PLAY_COLORS[i]; const out=playOut(i);
@@ -644,17 +646,17 @@ function resetLife(){
   p.life=Array.from({length:n},()=>p.start);
   p.poison=Array.from({length:n},()=>0);
   p.cmd=Array.from({length:n},()=>Array.from({length:n},()=>0));
-  renderPlay();
+  renderPlay(); publishState();
 }
-function life(i,d){ state.play.life[i]=(state.play.life[i]||0)+d; renderPlay(); }
-function poison(i,d){ const a=state.play.poison; a[i]=Math.max(0,(a[i]||0)+d); renderPlay(); }
+function life(i,d){ state.play.life[i]=(state.play.life[i]||0)+d; renderPlay(); publishState(); }
+function poison(i,d){ const a=state.play.poison; a[i]=Math.max(0,(a[i]||0)+d); renderPlay(); publishState(); }
 function cmdDmg(i,j,d){
   const p=state.play;
   if(!p.cmd[i]) p.cmd[i]=Array.from({length:p.count},()=>0);
   const cur=p.cmd[i][j]||0, nv=Math.max(0,cur+d), applied=nv-cur;
   p.cmd[i][j]=nv;
   p.life[i]=(p.life[i]||0)-applied; // commander damage is combat damage — also lowers life
-  renderPlay();
+  renderPlay(); publishState();
 }
 
 // ---------- PLAY: solo Commander playtest ----------
@@ -749,6 +751,57 @@ function renderGame(){
   if(g.exile.length) h+=`<div class="zone"><div class="zone-h"><span>Exile (${g.exile.length})</span></div><div class="zone-cards">${zc(g.exile,'exile')}</div></div>`;
   main.innerHTML=h;
 }
+
+// ---------- Remote: shared life counter across devices (MQTT relay) ----------
+function loadMqtt(){ if(window.mqtt) return Promise.resolve(); return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://unpkg.com/mqtt/dist/mqtt.min.js'; s.onload=()=>res(); s.onerror=()=>rej(new Error('mqtt load')); document.head.appendChild(s); }); }
+function genCode(){ let c=''; const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; for(let i=0;i<4;i++) c+=A[Math.floor(Math.random()*A.length)]; return c; }
+function roomTopic(code){ return 'planardeckbox/v1/'+code.toUpperCase(); }
+async function joinRoom(code){
+  code=(code||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);
+  if(code.length<4){ toast('Enter a 4-character code'); return; }
+  try{ await loadMqtt(); }catch(e){ toast('Could not load sharing'); return; }
+  if(state.session){ try{ state.session.client.end(true); }catch(e){} }
+  const sender=Math.random().toString(36).slice(2,10);
+  const client=mqtt.connect('wss://broker.emqx.io:8084/mqtt',{clientId:'pdbx_'+sender,reconnectPeriod:3000,connectTimeout:9000});
+  state.session={code,client,sender,status:'connecting'};
+  state.tab='play'; state.play.mode='life';
+  showShareModal();
+  client.on('connect',()=>{ state.session.status='connected'; client.subscribe(roomTopic(code)); publishState(); if($('#shareBody')) showShareModal(); if(state.tab==='play'&&!state.game) renderPlay(); });
+  client.on('message',(t,payload)=>{ try{ const d=JSON.parse(payload.toString()); if(!state.session||d.sender===state.session.sender) return; if(d.play){ state.play=d.play; if(state.tab==='play'&&!state.game) renderPlay(); } }catch(e){} });
+  client.on('error',()=>{ if(state.session){ state.session.status='error'; if($('#shareBody')) showShareModal(); } });
+  client.on('close',()=>{ if(state.session&&state.session.status==='connected') state.session.status='reconnecting'; });
+  client.on('reconnect',()=>{ if(state.session&&state.session.status!=='connected') state.session.status='connecting'; });
+}
+function publishState(){ const s=state.session; if(s&&s.client&&s.status==='connected'){ try{ s.client.publish(roomTopic(s.code), JSON.stringify({sender:s.sender,play:state.play}), {retain:true}); }catch(e){} } }
+function leaveSession(){ const s=state.session; if(s){ try{ s.client.end(true); }catch(e){} } state.session=null; closeModal(); render(); }
+function shareUrl(){ return location.origin+location.pathname+'?room='+(state.session?state.session.code:''); }
+function openShare(){ showShareModal(); }
+function showShareModal(){
+  const s=state.session; let inner;
+  if(!s){
+    inner=`<h3>Remote life counter</h3>
+      <p class="tiny muted" style="margin-bottom:14px">Sync the life counter across phones over the internet. Create a room and share the code, or join one. Everyone in the same room sees the same totals.</p>
+      <button class="btn gold full" onclick="joinRoom('${genCode()}')">📡 Create a room</button>
+      <div class="section-title" style="margin:15px 2px 6px">Join with a code</div>
+      <div class="row" style="gap:8px"><input id="joinCode" class="scan-input" placeholder="4-char code" maxlength="4" autocomplete="off" style="text-transform:uppercase"><button class="btn" onclick="joinRoom(document.getElementById('joinCode').value)">Join</button></div>
+      <button class="btn ghost full" style="margin-top:12px" onclick="closeModal()">Cancel</button>`;
+  } else {
+    const url=shareUrl(), st=s.status;
+    const dot = st==='connected'?'<span style="color:var(--ok)">● Live</span>':st==='error'?'<span style="color:var(--danger)">Connection failed — try again</span>':'<span class="muted">Connecting…</span>';
+    inner=`<h3>Room ${s.code}</h3><div id="shareBody">
+        <div style="text-align:center">
+          <div style="font-family:'Cinzel',serif;font-size:42px;font-weight:700;color:var(--accent2);letter-spacing:7px;margin:2px 0 10px">${s.code}</div>
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=170x170&margin=8&bgcolor=1b2036&color=e3c14b&data=${encodeURIComponent(url)}" style="border-radius:10px;background:var(--panel2)" alt="join QR">
+          <div class="tiny muted" style="margin:9px 0 4px">Scan to join · same room = same life totals</div>
+          <div class="tiny" style="font-weight:700">${dot}</div>
+        </div>
+        <button class="btn full" style="margin-top:12px" onclick="copyShare()">Copy join link</button>
+        <button class="btn danger full" style="margin-top:8px" onclick="leaveSession()">Leave room</button>
+      </div>`;
+  }
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">${inner}</div></div>`;
+}
+function copyShare(){ const u=shareUrl(); if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(u).then(()=>toast('Link copied')).catch(()=>toast(u)); } else toast(u); }
 
 // ============================================================
 //  ACTIONS
@@ -1290,9 +1343,13 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu});
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,
+  openShare,joinRoom,leaveSession,copyShare});
 
 render();
+
+// Auto-join a shared life-counter room from a ?room=CODE link.
+(()=>{ const rm=new URLSearchParams(location.search).get('room'); if(rm) joinRoom(rm); })();
 
 // Register service worker so the app installs to the home screen and works offline.
 if('serviceWorker' in navigator){
