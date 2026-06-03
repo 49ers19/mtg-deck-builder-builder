@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0d0f1a">
+<meta name="apple-mobile-web-app-title" content="Deckbox">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Planar Deckbox — MTG Deck Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0d0f1a; --bg2:#141828; --panel:#1b2036; --panel2:#232a44;
+  --line:#2c3458; --text:#e8eaf2; --muted:#8b93b8; --accent:#c9a227; --accent2:#e3c14b;
+  --W:#f8f6d8; --U:#aae0fa; --B:#bcb6b0; --R:#f9a98a; --G:#9bd6a3; --C:#c8cbe0;
+  --danger:#e0556b; --ok:#4caf7d;
+  --safe-b:env(safe-area-inset-bottom);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;overscroll-behavior:none}
+body{display:flex;flex-direction:column;max-width:560px;margin:0 auto;position:relative;min-height:100dvh}
+h1,h2,h3,.brand{font-family:'Cinzel',serif}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input{font-family:inherit}
+.hidden{display:none!important}
+
+/* Header */
+header{padding:calc(env(safe-area-inset-top) + 14px) 16px 12px;background:linear-gradient(180deg,#161a2e,#0d0f1a);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.brand{font-size:20px;font-weight:700;letter-spacing:.5px;color:var(--accent2);display:flex;align-items:center;gap:9px}
+.brand .gem{width:16px;height:16px;transform:rotate(45deg);background:linear-gradient(135deg,var(--accent2),var(--accent));border-radius:3px;box-shadow:0 0 12px rgba(227,193,75,.5)}
+.sub{font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:.3px}
+
+/* Main scroll area */
+main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 14px calc(86px + var(--safe-b))}
+
+/* Bottom nav */
+nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:560px;display:flex;background:#11131f;border-top:1px solid var(--line);padding-bottom:var(--safe-b);z-index:30}
+nav button{flex:1;padding:11px 4px 12px;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);font-size:11px;font-weight:600;transition:color .15s}
+nav button .ic{font-size:20px;line-height:1}
+nav button.active{color:var(--accent2)}
+nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
+
+/* Cards / panels */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.row{display:flex;align-items:center;gap:10px}
+.between{justify-content:space-between}
+.muted{color:var(--muted)}
+.tiny{font-size:11px}
+.section-title{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin:4px 2px 10px}
+
+/* Buttons */
+.btn{background:linear-gradient(180deg,#2a3252,#222a45);border:1px solid var(--line);border-radius:10px;padding:11px 14px;font-weight:600;font-size:14px;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:filter .12s,transform .05s}
+.btn:active{transform:scale(.97)}
+.btn.gold{background:linear-gradient(180deg,var(--accent2),var(--accent));color:#23200a;border-color:var(--accent)}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--danger);border-color:#48283a}
+.btn.sm{padding:7px 11px;font-size:13px;border-radius:9px}
+.btn.full{width:100%}
+.iconbtn{width:32px;height:32px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700}
+
+/* Search input */
+.search-wrap{position:relative;margin-bottom:12px}
+.search-wrap input{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:13px 42px 13px 14px;color:var(--text);font-size:15px}
+.search-wrap input:focus{outline:none;border-color:var(--accent)}
+.search-wrap .spin{position:absolute;right:13px;top:50%;transform:translateY(-50%);width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--accent2);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:translateY(-50%) rotate(360deg)}}
+
+/* Result card row */
+.cardrow{display:flex;gap:11px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:9px;margin-bottom:9px;align-items:center}
+.cardrow .thumb{width:46px;height:64px;border-radius:6px;background:var(--bg2) center/cover;flex-shrink:0;border:1px solid var(--line)}
+.cardrow .info{flex:1;min-width:0}
+.cardrow .nm{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cardrow .meta{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pips{display:inline-flex;gap:3px;vertical-align:middle;margin-left:4px}
+.pip{width:13px;height:13px;border-radius:50%;display:inline-block;font-size:9px;text-align:center;line-height:13px;font-weight:700;color:#1a1a1a}
+.pip.W{background:var(--W)}.pip.U{background:var(--U)}.pip.B{background:var(--B)}.pip.R{background:var(--R)}.pip.G{background:var(--G)}.pip.C{background:var(--C)}
+.qtybox{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.qtybox .n{min-width:20px;text-align:center;font-weight:700;font-size:15px}
+
+/* Deck list items */
+.decktile{background:linear-gradient(135deg,#1d2238,#161a2c);border:1px solid var(--line);border-radius:13px;padding:14px;margin-bottom:11px;display:flex;align-items:center;gap:12px}
+.decktile .col{flex:1;min-width:0}
+.decktile .dn{font-weight:700;font-size:16px;font-family:'Cinzel',serif}
+.decktile .ds{font-size:12px;color:var(--muted);margin-top:3px}
+.colorbar{display:flex;height:5px;border-radius:3px;overflow:hidden;margin-top:8px;background:var(--bg2)}
+.colorbar i{display:block;height:100%}
+
+/* Stats */
+.statgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:12px}
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:11px;text-align:center}
+.stat .v{font-size:22px;font-weight:700;font-family:'Cinzel',serif;color:var(--accent2)}
+.stat .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+.curve{display:flex;align-items:flex-end;gap:5px;height:90px;padding-top:8px}
+.curve .bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%}
+.curve .bar .fill{width:100%;background:linear-gradient(180deg,var(--accent2),var(--accent));border-radius:4px 4px 0 0;min-height:3px;transition:height .3s}
+.curve .bar .cnt{font-size:10px;color:var(--muted);font-weight:600}
+.curve .bar .lbl{font-size:10px;color:var(--muted)}
+
+/* Empty states */
+.empty{text-align:center;padding:46px 20px;color:var(--muted)}
+.empty .big{font-size:42px;margin-bottom:12px;opacity:.7}
+.empty .t{font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px}
+
+/* Modal */
+.modal-bg{position:fixed;inset:0;background:rgba(5,6,12,.7);backdrop-filter:blur(3px);z-index:50;display:flex;align-items:flex-end;justify-content:center}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:18px 18px 0 0;width:100%;max-width:560px;padding:20px 18px calc(22px + var(--safe-b));animation:slideup .22s ease}
+@keyframes slideup{from{transform:translateY(40px);opacity:.6}to{transform:translateY(0);opacity:1}}
+.modal h3{font-size:18px;margin-bottom:14px}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.field input,.field select{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--text);font-size:15px}
+.field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
+
+/* Detail header */
+.detail-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.detail-head .back{font-size:22px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
+.detail-head .ttl{flex:1;font-size:19px;font-weight:700;font-family:'Cinzel',serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* group header within deck */
+.grp{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:14px 2px 8px;display:flex;justify-content:space-between}
+.toast{position:fixed;bottom:calc(96px + var(--safe-b));left:50%;transform:translateX(-50%);background:#23304a;border:1px solid var(--line);color:var(--text);padding:10px 16px;border-radius:30px;font-size:13px;font-weight:600;z-index:60;box-shadow:0 6px 24px rgba(0,0,0,.4);animation:pop .2s}
+@keyframes pop{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+.addmenu{display:flex;flex-direction:column;gap:8px}
+
+/* Scanner */
+.scanner{position:fixed;inset:0;background:#000;z-index:80;overflow:hidden}
+#scanVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+.scan-frame{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;padding:0 18px}
+.scan-guide{position:relative;width:min(80vw,330px);aspect-ratio:63/88;border:2px solid rgba(255,255,255,.85);border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
+.scan-guide .name-strip{position:absolute;top:4%;left:5%;width:78%;height:12%;border:2px solid var(--accent2);border-radius:5px;box-shadow:0 0 10px rgba(227,193,75,.5)}
+.scan-hint{margin-top:18px;color:#fff;font-size:12px;text-align:center;background:rgba(0,0,0,.5);padding:7px 12px;border-radius:20px;max-width:300px;line-height:1.5}
+.scan-status{position:absolute;top:calc(env(safe-area-inset-top) + 16px);left:50%;transform:translateX(-50%);background:rgba(20,24,40,.92);border:1px solid var(--line);color:#fff;padding:9px 16px;border-radius:22px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:9px;z-index:5;max-width:88vw}
+.mini-spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:var(--accent2);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;flex-shrink:0}
+.scan-controls{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:20px 28px calc(24px + var(--safe-b));z-index:6}
+.scan-x{width:46px;height:46px;border-radius:50%;background:rgba(20,24,40,.85);border:1px solid var(--line);color:#fff;font-size:20px}
+.shutter{width:72px;height:72px;border-radius:50%;background:#fff;border:5px solid rgba(255,255,255,.4);transition:transform .1s}
+.shutter:active{transform:scale(.92)}
+.shutter.busy{opacity:.5;pointer-events:none}
+.scan-result{position:absolute;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:16px 16px calc(18px + var(--safe-b));z-index:7;animation:slideup .2s ease}
+.scan-result .scan-card{display:flex;gap:12px;align-items:center;margin-bottom:14px}
+.scan-result .scan-card .thumb{width:48px;height:67px;border-radius:6px;background:var(--bg2) center/cover;border:1px solid var(--line);flex-shrink:0}
+.scan-result .scan-card .info{min-width:0}
+.scan-result .scan-card .nm{font-weight:700;font-size:15px}
+.scan-result .scan-card .meta{font-size:12px;color:var(--muted);margin-top:3px}
+.scan-actions{display:flex;flex-direction:column;gap:9px}
+.scan-input{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:11px;color:var(--text);font-size:15px}
+.scan-input:focus{outline:none;border-color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="gem"></span>Planar Deckbox</div>
+  <div class="sub" id="subtitle">Magic: The Gathering deck builder &amp; collection</div>
+</header>
+
+<main id="main"></main>
+
+<nav>
+  <button data-tab="decks" class="active"><span class="ic">🗂️</span>Decks</button>
+  <button data-tab="search"><span class="ic">🔍</span>Search</button>
+  <button data-tab="collection"><span class="ic">📚</span>Collection</button>
+</nav>
+
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script>
+// ============================================================
+//  PLANAR DECKBOX — MTG deck builder + collection tracker
+//  Single-file app. Data in localStorage. Cards via Scryfall.
+// ============================================================
+const $ = (s,el=document)=>el.querySelector(s);
+const main = $('#main'), modalRoot = $('#modalRoot'), toastRoot = $('#toastRoot');
+
+// ---------- Persistence ----------
+const DB = {
+  load(){
+    try{
+      return {
+        decks: JSON.parse(localStorage.getItem('pdb_decks')||'[]'),
+        collection: JSON.parse(localStorage.getItem('pdb_collection')||'{}'),
+        cards: JSON.parse(localStorage.getItem('pdb_cards')||'{}'),
+      };
+    }catch(e){ return {decks:[],collection:{},cards:{}}; }
+  },
+  save(){
+    localStorage.setItem('pdb_decks', JSON.stringify(state.decks));
+    localStorage.setItem('pdb_collection', JSON.stringify(state.collection));
+    localStorage.setItem('pdb_cards', JSON.stringify(state.cards));
+  }
+};
+const loaded = DB.load();
+const state = {
+  tab:'decks',
+  decks: loaded.decks,        // [{id,name,format,cards:{cardId:qty}}]
+  collection: loaded.collection, // {cardId:qty}
+  cards: loaded.cards,        // {cardId:{cached card fields}}
+  openDeckId: null,
+  searchResults: [],
+  searchQuery: '',
+};
+
+const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+// ---------- Card cache helper ----------
+function cacheCard(c){
+  if(!state.cards[c.id]){
+    state.cards[c.id] = {
+      id:c.id, name:c.name, mana_cost:c.mana_cost||'', cmc:c.cmc||0,
+      type_line:c.type_line||'', colors:c.colors||c.color_identity||[],
+      img: (c.image_uris&&c.image_uris.normal) || (c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.normal) || '',
+      thumb:(c.image_uris&&c.image_uris.small) || (c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small) || '',
+      set:(c.set||'').toUpperCase(), rarity:c.rarity||'', price:(c.prices&&c.prices.usd)||null,
+    };
+  }
+  return state.cards[c.id];
+}
+const card = id => state.cards[id];
+
+// ---------- Toast ----------
+let toastT;
+function toast(msg){
+  toastRoot.innerHTML = `<div class="toast">${msg}</div>`;
+  clearTimeout(toastT); toastT = setTimeout(()=>toastRoot.innerHTML='',1600);
+}
+
+// ---------- Mana pip rendering ----------
+const COLOR_NAMES={W:'White',U:'Blue',B:'Black',R:'Red',G:'Green',C:'Colorless'};
+function pips(colors){
+  if(!colors||!colors.length) return '<span class="pips"><span class="pip C">◇</span></span>';
+  return '<span class="pips">'+colors.map(c=>`<span class="pip ${c}">${c}</span>`).join('')+'</span>';
+}
+
+// ---------- Scryfall ----------
+let searchTimer, searchSeq=0;
+async function scrySearch(q){
+  const seq = ++searchSeq;
+  if(!q.trim()){ state.searchResults=[]; if(state.tab==='search') render(); return; }
+  setSearchLoading(true);
+  try{
+    const r = await fetch('https://api.scryfall.com/cards/search?unique=cards&order=name&q='+encodeURIComponent(q));
+    if(seq!==searchSeq) return; // stale
+    if(r.status===404){ state.searchResults=[]; }
+    else{ const d = await r.json(); state.searchResults = (d.data||[]).slice(0,40); }
+  }catch(e){ state.searchResults=[]; toast('Network error'); }
+  if(seq===searchSeq){ setSearchLoading(false); if(state.tab==='search') render(); }
+}
+function setSearchLoading(b){
+  const sp = $('#searchSpin'); if(sp) sp.classList.toggle('hidden',!b);
+}
+
+// ============================================================
+//  RENDER
+// ============================================================
+function render(){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===state.tab));
+  if(state.tab==='decks') state.openDeckId ? renderDeckDetail() : renderDecks();
+  else if(state.tab==='search') renderSearch();
+  else if(state.tab==='collection') renderCollection();
+  $('#subtitle').textContent = ({
+    decks:'Your decks', search:'Find cards on Scryfall', collection:'Cards you own'
+  })[state.tab] || '';
+}
+
+// ---------- DECKS LIST ----------
+function deckColorCounts(deck){
+  const counts={W:0,U:0,B:0,R:0,G:0,C:0}; let total=0;
+  for(const id in deck.cards){
+    const c=card(id); if(!c) continue;
+    const q=deck.cards[id];
+    const cols=c.colors&&c.colors.length?c.colors:['C'];
+    cols.forEach(col=>{counts[col]=(counts[col]||0)+q; total+=q;});
+  }
+  return {counts,total};
+}
+function deckCardCount(deck){ let n=0; for(const id in deck.cards) n+=deck.cards[id]; return n; }
+
+function renderDecks(){
+  let h = `<div class="row between" style="margin-bottom:14px">
+      <div class="section-title" style="margin:0">Your Decks (${state.decks.length})</div>
+      <button class="btn gold sm" onclick="openDeckModal()">＋ New Deck</button>
+    </div>`;
+  if(!state.decks.length){
+    h += `<div class="empty"><div class="big">🗂️</div><div class="t">No decks yet</div>
+      <div class="tiny">Create a deck, then add cards from Search.</div>
+      <button class="btn gold full" style="margin-top:18px" onclick="openDeckModal()">＋ Build your first deck</button></div>`;
+  } else {
+    state.decks.forEach(d=>{
+      const {counts,total}=deckColorCounts(d);
+      const n=deckCardCount(d);
+      const bar = total? Object.keys(counts).filter(k=>counts[k]).map(k=>
+        `<i style="width:${(counts[k]/total*100).toFixed(1)}%;background:var(--${k})"></i>`).join('') : '<i style="width:100%;background:var(--line)"></i>';
+      h += `<div class="decktile" onclick="openDeck('${d.id}')">
+        <div class="col">
+          <div class="dn">${esc(d.name)}</div>
+          <div class="ds">${d.format||'Casual'} · ${n} card${n===1?'':'s'}</div>
+          <div class="colorbar">${bar}</div>
+        </div>
+        <div style="font-size:22px;color:var(--muted)">›</div>
+      </div>`;
+    });
+  }
+  main.innerHTML = h;
+}
+
+// ---------- DECK DETAIL ----------
+function renderDeckDetail(){
+  const d = state.decks.find(x=>x.id===state.openDeckId);
+  if(!d){ state.openDeckId=null; return renderDecks(); }
+  const n = deckCardCount(d);
+  const {counts,total}=deckColorCounts(d);
+
+  // mana curve (nonland)
+  const buckets=[0,0,0,0,0,0,0,0]; // 0..6, 7+
+  let lands=0, avgNum=0, avgDen=0;
+  for(const id in d.cards){
+    const c=card(id); if(!c) continue;
+    const q=d.cards[id];
+    if(/\bLand\b/.test(c.type_line)){ lands+=q; continue; }
+    const b=Math.min(7,Math.floor(c.cmc||0));
+    buckets[b]+=q; avgNum+=(c.cmc||0)*q; avgDen+=q;
+  }
+  const maxB = Math.max(1,...buckets);
+  const avg = avgDen? (avgNum/avgDen).toFixed(2) : '0.00';
+
+  // group cards by type
+  const groups = groupDeckCards(d);
+
+  let h = `<div class="detail-head">
+      <button class="back" onclick="closeDeck()">‹</button>
+      <div class="ttl">${esc(d.name)}</div>
+      <button class="iconbtn" onclick="openDeckModal('${d.id}')">✎</button>
+    </div>
+    <div class="statgrid">
+      <div class="stat"><div class="v">${n}</div><div class="l">Cards</div></div>
+      <div class="stat"><div class="v">${lands}</div><div class="l">Lands</div></div>
+      <div class="stat"><div class="v">${avg}</div><div class="l">Avg CMC</div></div>
+    </div>`;
+
+  // color identity bar
+  if(total){
+    h += `<div class="panel"><div class="section-title" style="margin-top:0">Color Breakdown</div><div class="row" style="flex-wrap:wrap;gap:10px">`;
+    Object.keys(counts).filter(k=>counts[k]).forEach(k=>{
+      h+=`<div class="row" style="gap:5px">${pips([k])}<span class="tiny muted">${COLOR_NAMES[k]} ${counts[k]}</span></div>`;
+    });
+    h+=`</div></div>`;
+  }
+
+  // mana curve
+  if(avgDen){
+    h += `<div class="panel"><div class="section-title" style="margin-top:0">Mana Curve</div><div class="curve">`;
+    buckets.forEach((cnt,i)=>{
+      h+=`<div class="bar"><span class="cnt">${cnt||''}</span><div class="fill" style="height:${cnt/maxB*100}%"></div><span class="lbl">${i===7?'7+':i}</span></div>`;
+    });
+    h+=`</div></div>`;
+  }
+
+  // card list grouped
+  if(!n){
+    h += `<div class="empty"><div class="big">🃏</div><div class="t">Empty deck</div>
+      <div class="tiny">Head to Search to add cards.</div>
+      <button class="btn gold full" style="margin-top:16px" onclick="setTab('search')">🔍 Find cards</button></div>`;
+  } else {
+    for(const g of groups){
+      h += `<div class="grp"><span>${g.name}</span><span>${g.count}</span></div>`;
+      g.items.forEach(({id,qty})=>{
+        const c=card(id); if(!c) return;
+        h += cardRowHTML(c, qty, `deckQty('${d.id}','${id}',-1)`, `deckQty('${d.id}','${id}',1)`);
+      });
+    }
+  }
+  main.innerHTML = h;
+}
+
+function groupDeckCards(d){
+  const order=['Creature','Planeswalker','Instant','Sorcery','Artifact','Enchantment','Land','Other'];
+  const map={}; order.forEach(o=>map[o]=[]);
+  for(const id in d.cards){
+    const c=card(id); if(!c) continue;
+    const t=c.type_line||'';
+    let g='Other';
+    for(const o of order){ if(o!=='Other' && new RegExp('\\b'+o+'\\b').test(t)){ g=o; break; } }
+    map[g].push({id,qty:d.cards[id]});
+  }
+  return order.filter(o=>map[o].length).map(o=>({
+    name:o==='Other'?'Other':o+'s',
+    count:map[o].reduce((s,x)=>s+x.qty,0),
+    items:map[o].sort((a,b)=>card(a.id).name.localeCompare(card(b.id).name))
+  }));
+}
+
+// ---------- Generic card row ----------
+function cardRowHTML(c, qty, decFn, incFn){
+  return `<div class="cardrow">
+    <div class="thumb" style="background-image:url('${c.thumb||''}')" onclick="showCard('${c.id}')"></div>
+    <div class="info" onclick="showCard('${c.id}')">
+      <div class="nm">${esc(c.name)}</div>
+      <div class="meta">${manaText(c.mana_cost)} · ${esc(shortType(c.type_line))}</div>
+    </div>
+    <div class="qtybox">
+      <button class="iconbtn" onclick="event.stopPropagation();${decFn}">−</button>
+      <span class="n">${qty}</span>
+      <button class="iconbtn" onclick="event.stopPropagation();${incFn}">＋</button>
+    </div>
+  </div>`;
+}
+function shortType(t){ return (t||'').split('—')[0].trim(); }
+function manaText(m){ return m? m.replace(/[{}]/g,'').replace(/\//g,'/') || '—' : '—'; }
+
+// ---------- SEARCH ----------
+function renderSearch(){
+  let h = `<div class="search-wrap">
+      <input id="searchInput" placeholder="Search cards, e.g. lightning bolt" value="${esc(state.searchQuery)}" autocomplete="off">
+      <div id="searchSpin" class="spin hidden"></div>
+    </div>`;
+  if(!state.searchQuery.trim()){
+    h += `<div class="empty"><div class="big">🔍</div><div class="t">Search Scryfall</div>
+      <div class="tiny">Try a name, or <b>t:dragon</b>, <b>c:rg</b>, <b>cmc=3</b>.<br>Powered by the Scryfall API.</div></div>`;
+  } else if(!state.searchResults.length){
+    h += `<div class="empty"><div class="big">🤔</div><div class="t">No results</div><div class="tiny">Check spelling or try a broader query.</div></div>`;
+  } else {
+    state.searchResults.forEach(c=>{
+      const owned = state.collection[c.id]||0;
+      h += `<div class="cardrow">
+        <div class="thumb" style="background-image:url('${(c.image_uris&&c.image_uris.small)||((c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small))||''}')" onclick="showCardObj(${esc(JSON.stringify(c.id))})"></div>
+        <div class="info">
+          <div class="nm">${esc(c.name)} ${pips(c.colors&&c.colors.length?c.colors:(c.color_identity||[]))}</div>
+          <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}</div>
+        </div>
+        <button class="btn gold sm" onclick="addMenu('${c.id}')">Add</button>
+      </div>`;
+    });
+  }
+  main.innerHTML = h;
+  const inp = $('#searchInput');
+  if(inp){
+    inp.oninput = e=>{
+      state.searchQuery = e.target.value;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(()=>scrySearch(e.target.value), 280);
+    };
+    // cache the result objects so addMenu/showCardObj can find them
+    state._resultMap = {}; state.searchResults.forEach(c=>state._resultMap[c.id]=c);
+  }
+}
+
+// ---------- COLLECTION ----------
+function renderCollection(){
+  const ids = Object.keys(state.collection).filter(id=>state.collection[id]>0);
+  ids.sort((a,b)=> (card(a)?.name||'').localeCompare(card(b)?.name||''));
+  let totalCards=0, totalVal=0, unique=ids.length;
+  ids.forEach(id=>{ totalCards+=state.collection[id]; const p=card(id)?.price; if(p) totalVal+=parseFloat(p)*state.collection[id]; });
+
+  let h = `<div class="statgrid">
+      <div class="stat"><div class="v">${totalCards}</div><div class="l">Total</div></div>
+      <div class="stat"><div class="v">${unique}</div><div class="l">Unique</div></div>
+      <div class="stat"><div class="v">$${totalVal.toFixed(0)}</div><div class="l">Est. Value</div></div>
+    </div>
+    <button class="btn gold full" style="margin-bottom:14px" onclick="openScanner()">📷 Scan a card</button>`;
+  if(!ids.length){
+    h += `<div class="empty"><div class="big">📚</div><div class="t">Empty collection</div>
+      <div class="tiny">Add cards you own from the Search tab.</div>
+      <button class="btn gold full" style="margin-top:16px" onclick="setTab('search')">🔍 Add cards</button></div>`;
+  } else {
+    h += `<div class="section-title">Owned Cards</div>`;
+    ids.forEach(id=>{
+      const c=card(id); if(!c) return;
+      h += cardRowHTML(c, state.collection[id], `collQty('${id}',-1)`, `collQty('${id}',1)`);
+    });
+  }
+  main.innerHTML = h;
+}
+
+// ============================================================
+//  ACTIONS
+// ============================================================
+function setTab(t){ state.tab=t; state.openDeckId=null; render(); if(t==='search') setTimeout(()=>$('#searchInput')?.focus(),50); }
+function openDeck(id){ state.openDeckId=id; render(); }
+function closeDeck(){ state.openDeckId=null; render(); }
+
+function deckQty(deckId,cardId,delta){
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  d.cards[cardId]=(d.cards[cardId]||0)+delta;
+  if(d.cards[cardId]<=0) delete d.cards[cardId];
+  DB.save(); renderDeckDetail();
+}
+function collQty(cardId,delta){
+  state.collection[cardId]=(state.collection[cardId]||0)+delta;
+  if(state.collection[cardId]<=0) delete state.collection[cardId];
+  DB.save(); render();
+}
+
+function addToCollection(cardId){
+  const c = state._resultMap&&state._resultMap[cardId]; if(c) cacheCard(c);
+  state.collection[cardId]=(state.collection[cardId]||0)+1;
+  DB.save(); toast('Added to collection'); render();
+}
+function addToDeck(cardId, deckId){
+  const c = state._resultMap&&state._resultMap[cardId]; if(c) cacheCard(c);
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  d.cards[cardId]=(d.cards[cardId]||0)+1;
+  DB.save(); toast('Added to '+d.name); closeModal();
+}
+
+// ---------- Add menu (collection or which deck) ----------
+function addMenu(cardId){
+  const c = state._resultMap&&state._resultMap[cardId];
+  const nm = c? c.name : 'card';
+  let deckBtns = state.decks.length
+    ? state.decks.map(d=>`<button class="btn full" onclick="addToDeck('${cardId}','${d.id}')">🗂️ ${esc(d.name)}</button>`).join('')
+    : `<div class="tiny muted" style="text-align:center;padding:6px">No decks yet — create one in the Decks tab.</div>`;
+  modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <h3>Add “${esc(nm)}”</h3>
+      <div class="addmenu">
+        <button class="btn gold full" onclick="addToCollection('${cardId}');closeModal()">📚 To collection</button>
+        <div class="section-title" style="margin:8px 2px 2px">Add to deck</div>
+        ${deckBtns}
+        <button class="btn ghost full" style="margin-top:6px" onclick="closeModal()">Cancel</button>
+      </div>
+    </div></div>`;
+}
+
+// ---------- Deck create/edit modal ----------
+function openDeckModal(editId){
+  const d = editId? state.decks.find(x=>x.id===editId) : null;
+  const formats=['Commander','Standard','Modern','Pioneer','Pauper','Legacy','Casual','Limited'];
+  modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <h3>${d?'Edit Deck':'New Deck'}</h3>
+      <div class="field"><label>Deck name</label>
+        <input id="mDeckName" placeholder="e.g. Mono-Red Aggro" value="${d?esc(d.name):''}"></div>
+      <div class="field"><label>Format</label>
+        <select id="mDeckFormat">${formats.map(f=>`<option ${d&&d.format===f?'selected':''}>${f}</option>`).join('')}</select></div>
+      <button class="btn gold full" onclick="saveDeck('${editId||''}')">${d?'Save':'Create deck'}</button>
+      ${d?`<button class="btn danger full" style="margin-top:9px" onclick="deleteDeck('${editId}')">Delete deck</button>`:''}
+      <button class="btn ghost full" style="margin-top:7px" onclick="closeModal()">Cancel</button>
+    </div></div>`;
+  setTimeout(()=>$('#mDeckName')?.focus(),60);
+}
+function saveDeck(editId){
+  const name=$('#mDeckName').value.trim()||'Untitled Deck';
+  const format=$('#mDeckFormat').value;
+  if(editId){
+    const d=state.decks.find(x=>x.id===editId); d.name=name; d.format=format;
+  } else {
+    const id=uid(); state.decks.push({id,name,format,cards:{}}); state.openDeckId=id;
+  }
+  DB.save(); closeModal(); render();
+}
+function deleteDeck(id){
+  if(!confirm('Delete this deck? This cannot be undone.')) return;
+  state.decks=state.decks.filter(x=>x.id!==id);
+  state.openDeckId=null; DB.save(); closeModal(); render();
+}
+
+// ---------- Card preview ----------
+function showCard(id){ const c=card(id); if(c) cardPreview(c.img||c.thumb, c.name); }
+function showCardObj(id){
+  const c=state._resultMap&&state._resultMap[id]; if(!c) return;
+  const img=(c.image_uris&&c.image_uris.normal)||(c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.normal)||'';
+  cardPreview(img,c.name);
+}
+function cardPreview(img,name){
+  if(!img){ toast('No image available'); return; }
+  modalRoot.innerHTML = `<div class="modal-bg" onclick="closeModal()" style="align-items:center">
+    <div style="text-align:center;padding:20px">
+      <img src="${img}" alt="${esc(name)}" style="max-width:88vw;max-height:74vh;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.6)">
+      <div class="tiny muted" style="margin-top:12px">Tap anywhere to close</div>
+    </div></div>`;
+}
+function closeModal(){ modalRoot.innerHTML=''; }
+
+// ---------- utils ----------
+function esc(s){ return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// ============================================================
+//  CARD SCANNER — camera capture + OCR (Tesseract.js) + Scryfall match
+// ============================================================
+let scanStream=null, scanBusy=false;
+
+function loadTesseract(){
+  if(window.Tesseract) return Promise.resolve();
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload=()=>res(); s.onerror=()=>rej(new Error('Failed to load OCR engine'));
+    document.head.appendChild(s);
+  });
+}
+
+async function openScanner(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ toast('Camera not supported on this device'); return; }
+  modalRoot.innerHTML = `
+    <div class="scanner">
+      <video id="scanVideo" autoplay muted playsinline></video>
+      <div class="scan-frame">
+        <div id="scanGuide" class="scan-guide"><div class="name-strip"></div></div>
+        <div class="scan-hint">Fit the card in the frame · keep its name inside the gold strip · tap the shutter</div>
+      </div>
+      <div id="scanStatus" class="scan-status hidden"></div>
+      <div id="scanResult" class="scan-result hidden"></div>
+      <div class="scan-controls">
+        <button class="scan-x" onclick="closeScanner()">✕</button>
+        <button id="scanShutter" class="shutter" onclick="captureScan()" aria-label="Capture"></button>
+        <div style="width:46px"></div>
+      </div>
+    </div>`;
+  const video=$('#scanVideo');
+  try{
+    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    video.srcObject=scanStream;
+    await video.play().catch(()=>{});
+  }catch(e){ toast('Camera unavailable — check permissions'); closeScanner(); }
+}
+
+function closeScanner(){
+  if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream=null; }
+  scanBusy=false; state._scanCard=null; modalRoot.innerHTML=''; render();
+}
+
+function setScanStatus(msg,busy){
+  const el=$('#scanStatus'); if(!el) return;
+  el.classList.toggle('hidden',!msg);
+  el.innerHTML = msg ? `${busy?'<span class="mini-spin"></span>':''}<span>${esc(msg)}</span>` : '';
+}
+
+// Map a rect in the video's displayed (CSS) coords to source pixel coords, accounting for object-fit:cover
+function displayToSource(video,dx,dy,dw,dh){
+  const vw=video.videoWidth, vh=video.videoHeight, cw=video.clientWidth, ch=video.clientHeight;
+  const scale=Math.max(cw/vw, ch/vh);
+  const offX=(vw*scale-cw)/2, offY=(vh*scale-ch)/2;
+  return {x:(dx+offX)/scale, y:(dy+offY)/scale, w:dw/scale, h:dh/scale};
+}
+
+// Grayscale + global threshold to help OCR read the title bar
+function binarize(ctx,canvas){
+  const img=ctx.getImageData(0,0,canvas.width,canvas.height), d=img.data; let sum=0;
+  for(let i=0;i<d.length;i+=4){ const g=0.3*d[i]+0.59*d[i+1]+0.11*d[i+2]; d[i]=d[i+1]=d[i+2]=g; sum+=g; }
+  const t=(sum/(d.length/4))*0.92;
+  for(let i=0;i<d.length;i+=4){ const v=d[i]>t?255:0; d[i]=d[i+1]=d[i+2]=v; }
+  ctx.putImageData(img,0,0);
+}
+
+function cleanName(t){
+  const line=(t||'').split('\n').map(s=>s.trim()).filter(s=>s.length>1)[0]||'';
+  return line.replace(/[^A-Za-z',\- ]/g,'').replace(/\s+/g,' ').trim();
+}
+
+async function captureScan(){
+  if(scanBusy) return;
+  const video=$('#scanVideo');
+  if(!video||!video.videoWidth){ toast('Camera still warming up…'); return; }
+  scanBusy=true; $('#scanShutter')?.classList.add('busy');
+  setScanStatus('Reading card…',true);
+  try{
+    const g=$('#scanGuide').getBoundingClientRect();
+    const vr=video.getBoundingClientRect();
+    const dx=(g.left-vr.left)+g.width*0.05;
+    const dy=(g.top-vr.top)+g.height*0.04;
+    const src=displayToSource(video,dx,dy,g.width*0.78,g.height*0.12);
+    const canvas=document.createElement('canvas');
+    canvas.width=640; canvas.height=Math.max(40,Math.round(640*src.h/src.w));
+    const cx=canvas.getContext('2d');
+    cx.drawImage(video,src.x,src.y,src.w,src.h,0,0,canvas.width,canvas.height);
+    binarize(cx,canvas);
+    await loadTesseract();
+    const {data}=await Tesseract.recognize(canvas,'eng');
+    const name=cleanName(data.text);
+    if(!name){ setScanStatus('Couldn’t read the name — reposition and retry',false); return; }
+    await matchScan(name);
+  }catch(e){
+    setScanStatus('Scan failed — try again',false);
+  }finally{
+    scanBusy=false; $('#scanShutter')?.classList.remove('busy');
+  }
+}
+
+async function scryNamed(name){
+  try{ const r=await fetch('https://api.scryfall.com/cards/named?fuzzy='+encodeURIComponent(name)); if(r.ok) return await r.json(); }catch(e){}
+  return null;
+}
+
+async function matchScan(name){
+  setScanStatus('Matching “'+name+'”…',true);
+  let c=await scryNamed(name);
+  if(!c){
+    try{ const r=await fetch('https://api.scryfall.com/cards/search?q='+encodeURIComponent(name)); if(r.ok){ const d=await r.json(); c=(d.data||[])[0]; } }catch(e){}
+  }
+  setScanStatus('',false);
+  showScanResult(c,name);
+}
+
+function showScanResult(c,readName){
+  const box=$('#scanResult'); if(!box) return;
+  box.classList.remove('hidden');
+  if(c){
+    state._scanCard=c; cacheCard(c);
+    const img=(c.image_uris&&c.image_uris.small)||(c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small)||'';
+    box.innerHTML=`
+      <div class="scan-card">
+        <div class="thumb" style="background-image:url('${img}')"></div>
+        <div class="info">
+          <div class="nm">${esc(c.name)} ${pips(c.colors&&c.colors.length?c.colors:(c.color_identity||[]))}</div>
+          <div class="meta">${esc(shortType(c.type_line||''))} · ${(c.set||'').toUpperCase()}</div>
+        </div>
+      </div>
+      <div class="scan-actions">
+        <button class="btn gold full" onclick="scanConfirm()">✓ Add to collection</button>
+        <div class="row" style="gap:8px">
+          <button class="btn full" onclick="scanEdit()">Wrong? Edit</button>
+          <button class="btn full" onclick="scanDismiss()">Scan next</button>
+        </div>
+      </div>`;
+  } else {
+    state._scanCard=null;
+    box.innerHTML=`
+      <div class="scan-card"><div class="info"><div class="nm">No match for “${esc(readName)}”</div><div class="meta">Fix the name and search again</div></div></div>
+      <div class="scan-actions">
+        <input id="scanEditInput" class="scan-input" value="${esc(readName)}" autocomplete="off">
+        <div class="row" style="gap:8px">
+          <button class="btn gold full" onclick="scanResearch()">Search</button>
+          <button class="btn full" onclick="scanDismiss()">Rescan</button>
+        </div>
+      </div>`;
+  }
+}
+
+function scanConfirm(){
+  const c=state._scanCard; if(!c) return;
+  state.collection[c.id]=(state.collection[c.id]||0)+1; DB.save();
+  toast(state.collection[c.id]+'× '+c.name+' added');
+  scanDismiss();
+}
+function scanEdit(){
+  const name=state._scanCard?state._scanCard.name:'';
+  const box=$('#scanResult');
+  box.innerHTML=`
+    <div class="scan-actions">
+      <input id="scanEditInput" class="scan-input" value="${esc(name)}" autocomplete="off">
+      <div class="row" style="gap:8px">
+        <button class="btn gold full" onclick="scanResearch()">Search</button>
+        <button class="btn full" onclick="scanDismiss()">Cancel</button>
+      </div>
+    </div>`;
+  setTimeout(()=>$('#scanEditInput')?.focus(),40);
+}
+function scanResearch(){
+  const v=$('#scanEditInput')?.value.trim(); if(!v) return;
+  setScanStatus('Searching…',true); matchScan(v);
+}
+function scanDismiss(){
+  state._scanCard=null;
+  const box=$('#scanResult'); if(box){ box.classList.add('hidden'); box.innerHTML=''; }
+  setScanStatus('',false);
+}
+
+// ---------- nav wiring ----------
+document.querySelectorAll('nav button').forEach(b=>{
+  b.onclick=()=>setTab(b.dataset.tab);
+});
+
+// expose for inline handlers
+Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQty,collQty,
+  addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,
+  openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss});
+
+render();
+
+// Register service worker so the app installs to the home screen and works offline.
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
