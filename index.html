@@ -163,6 +163,8 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .cmd-empty .nm{font-weight:700;font-size:14px}
 .pick-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(201,162,39,.12);border:1px solid var(--accent);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:13px}
 .pick-banner button{margin-left:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--text)}
+.imp-text{width:100%;min-height:150px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:11px;color:var(--text);font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;line-height:1.55}
+.imp-text:focus{outline:none;border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -298,12 +300,16 @@ function deckCardCount(deck){ let n=deck.commander?1:0; for(const id in deck.car
 function renderDecks(){
   let h = `<div class="row between" style="margin-bottom:14px">
       <div class="section-title" style="margin:0">Your Decks (${state.decks.length})</div>
-      <button class="btn gold sm" onclick="openDeckModal()">＋ New Deck</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn sm" onclick="openImport()">📋 Import</button>
+        <button class="btn gold sm" onclick="openDeckModal()">＋ New</button>
+      </div>
     </div>`;
   if(!state.decks.length){
     h += `<div class="empty"><div class="big">🗂️</div><div class="t">No decks yet</div>
-      <div class="tiny">Create a deck, then add cards from Search.</div>
-      <button class="btn gold full" style="margin-top:18px" onclick="openDeckModal()">＋ Build your first deck</button></div>`;
+      <div class="tiny">Build one card by card, or paste an existing list.</div>
+      <button class="btn gold full" style="margin-top:18px" onclick="openDeckModal()">＋ Build your first deck</button>
+      <button class="btn full" style="margin-top:9px" onclick="openImport()">📋 Import a deck list</button></div>`;
   } else {
     state.decks.forEach(d=>{
       const {counts,total}=deckColorCounts(d);
@@ -552,6 +558,101 @@ function removeCommander(deckId){
   d.commander=null; DB.save(); renderDeckDetail();
 }
 function cancelPickCommander(){ state.pickCommanderFor=null; state.tab='decks'; render(); }
+
+// ---------- Import a deck list ----------
+function openImport(){
+  const formats=['Commander','Standard','Modern','Pioneer','Pauper','Legacy','Casual','Limited'];
+  modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <h3>Import a deck list</h3>
+      <div class="field"><label>Deck name</label><input id="impName" placeholder="e.g. Atraxa Precon" autocomplete="off"></div>
+      <div class="field"><label>Format</label><select id="impFormat">${formats.map(f=>`<option ${f==='Commander'?'selected':''}>${f}</option>`).join('')}</select></div>
+      <div class="field"><label>Paste the list — one card per line (e.g. “1 Sol Ring”)</label>
+        <textarea id="impText" class="imp-text" placeholder="1 Atraxa, Praetors' Voice&#10;1 Sol Ring&#10;1 Arcane Signet&#10;..." autocomplete="off"></textarea></div>
+      <div id="impStatus" class="tiny muted" style="margin-bottom:10px"></div>
+      <button class="btn gold full" onclick="runImport()">Import deck</button>
+      <button class="btn ghost full" style="margin-top:7px" onclick="closeModal()">Cancel</button>
+    </div></div>`;
+  setTimeout(()=>$('#impText')?.focus(),60);
+}
+
+function parseDeckList(text){
+  const cards=[]; let commanderName=null; let section='deck';
+  const headerRe=/^(commander|companion|deck|mainboard|main|sideboard|maybeboard|token)/i;
+  for(const raw of text.split('\n')){
+    const line=raw.trim();
+    if(!line) continue;
+    if(!/^\d/.test(line) && headerRe.test(line.replace(/[^a-z]/gi,''))){
+      const m=line.toLowerCase();
+      if(m.startsWith('commander')) section='commander';
+      else if(m.startsWith('sideboard')||m.startsWith('maybeboard')||m.startsWith('token')) section='skip';
+      else section='deck';
+      continue;
+    }
+    const isCmd=/\*cmdr\*|\*commander\*/i.test(line);
+    let qty=1, name=line;
+    const qm=line.match(/^(\d+)\s*[xX]?\s+(.*)$/);
+    if(qm){ qty=parseInt(qm[1],10)||1; name=qm[2]; }
+    name=name.replace(/\*[^*]*\*/g,'')
+             .replace(/\([A-Za-z0-9]{2,6}\)\s*[A-Za-z0-9-]*$/,'')
+             .replace(/\s+#?\d+$/,'')
+             .replace(/<[^>]*>/g,'')
+             .trim();
+    if(name.includes('//')) name=name.split('//')[0].trim();
+    if(!name || section==='skip') continue;
+    if(section==='commander' || isCmd){ commanderName=name; continue; }
+    cards.push({qty,name});
+  }
+  return {cards, commanderName};
+}
+
+async function scryCollection(names){
+  const found=[]; const notFound=[];
+  for(let i=0;i<names.length;i+=75){
+    const chunk=names.slice(i,i+75);
+    try{
+      const r=await fetch('https://api.scryfall.com/cards/collection',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({identifiers:chunk.map(n=>({name:n}))})
+      });
+      const d=await r.json();
+      (d.data||[]).forEach(c=>found.push(c));
+      (d.not_found||[]).forEach(nf=>{ if(nf&&nf.name) notFound.push(nf.name); });
+    }catch(e){ chunk.forEach(n=>notFound.push(n)); }
+  }
+  return {found,notFound};
+}
+
+async function runImport(){
+  const text=($('#impText')&&$('#impText').value)||'';
+  const parsed=parseDeckList(text);
+  const names=parsed.cards.map(c=>c.name);
+  if(parsed.commanderName) names.push(parsed.commanderName);
+  const unique=[...new Set(names)];
+  if(!unique.length){ if($('#impStatus')) $('#impStatus').textContent='Nothing to import — paste a list first.'; return; }
+  if($('#impStatus')) $('#impStatus').innerHTML='<span class="mini-spin"></span> Looking up '+unique.length+' cards…';
+  const {found}=await scryCollection(unique);
+  const norm=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'');
+  const map={};
+  found.forEach(c=>{ map[norm(c.name)]=c; if(c.name.includes('//')) map[norm(c.name.split('//')[0])]=c; });
+  const name=($('#impName')&&$('#impName').value.trim())||'Imported Deck';
+  const format=($('#impFormat')&&$('#impFormat').value)||'Casual';
+  const id=uid(); const deck={id,name,format,cards:{},commander:null};
+  let added=0; const missing=[];
+  parsed.cards.forEach(({qty,name})=>{
+    const c=map[norm(name)];
+    if(c){ cacheCard(c); deck.cards[c.id]=(deck.cards[c.id]||0)+qty; added+=qty; }
+    else missing.push(name);
+  });
+  if(parsed.commanderName){
+    const c=map[norm(parsed.commanderName)];
+    if(c){ cacheCard(c); deck.commander=c.id; delete deck.cards[c.id]; }
+    else missing.push(parsed.commanderName+' (commander)');
+  }
+  state.decks.push(deck); state.openDeckId=id; DB.save();
+  closeModal(); render();
+  toast(missing.length ? added+' cards in · '+missing.length+' not found' : added+' cards imported');
+}
 
 function deckQty(deckId,cardId,delta){
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
@@ -841,7 +942,8 @@ document.querySelectorAll('nav button').forEach(b=>{
 Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQty,collQty,
   addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,
-  startPickCommander,setCommander,removeCommander,cancelPickCommander});
+  startPickCommander,setCommander,removeCommander,cancelPickCommander,
+  openImport,runImport});
 
 render();
 
