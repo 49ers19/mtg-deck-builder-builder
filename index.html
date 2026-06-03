@@ -190,6 +190,21 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .ctr-n{min-width:18px;text-align:center;font-weight:700;font-size:14px}
 .ctr.danger{border-color:var(--danger)}
 .ctr.danger .ctr-n{color:var(--danger)}
+
+/* Solo playtest */
+.game-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.game-top .ttl{flex:1;font-family:'Cinzel',serif;font-weight:700;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.turn-badge{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;color:var(--accent2);flex-shrink:0}
+.game-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.gcount{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:12px;font-weight:700;color:var(--muted);display:flex;gap:6px;align-items:center}
+.gcount b{color:var(--text);font-size:14px}
+.zone{margin-bottom:12px}
+.zone.bf{background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:12px;padding:10px;min-height:84px}
+.zone-h{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px}
+.zone-cards{display:flex;flex-wrap:wrap;gap:6px}
+.gcard{width:48px;height:67px;border-radius:5px;background:var(--bg2) center/cover;border:1px solid var(--line);cursor:pointer;flex-shrink:0;transition:transform .08s}
+.gcard:active{transform:scale(1.05)}
+.gcard.tapped{opacity:.45;filter:grayscale(.6);transform:rotate(10deg)}
 </style>
 </head>
 <body>
@@ -244,7 +259,8 @@ const state = {
   openDeckId: null,
   searchResults: [],
   searchQuery: '',
-  play: { count:2, start:40, life:[40,40], poison:[0,0], cmd:[[0,0],[0,0]] },
+  play: { count:2, start:40, life:[40,40], poison:[0,0], cmd:[[0,0],[0,0]], mode:'life' },
+  game: null,
 };
 
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -307,7 +323,7 @@ function render(){
   else if(state.tab==='collection') renderCollection();
   else if(state.tab==='play') renderPlay();
   $('#subtitle').textContent = ({
-    decks:'Your decks', search:'Find cards on Scryfall', collection:'Cards you own', play:'Life counter'
+    decks:'Your decks', search:'Find cards on Scryfall', collection:'Cards you own', play:'Life counter & playtest'
   })[state.tab] || '';
 }
 
@@ -570,6 +586,15 @@ function playOut(i){
   return null;
 }
 function renderPlay(){
+  if(state.game) return renderGame();
+  const mode=state.play.mode||'life';
+  main.innerHTML = `<div class="play-ctrl" style="margin-bottom:14px"><div class="pc-group">
+      <button class="pc-btn ${mode==='life'?'on':''}" onclick="setPlayMode('life')">❤ Life</button>
+      <button class="pc-btn ${mode==='play'?'on':''}" onclick="setPlayMode('play')">▶ Playtest</button>
+    </div></div>` + (mode==='play' ? deckPickerHTML() : lifeCounterHTML());
+}
+function setPlayMode(m){ state.play.mode=m; render(); }
+function lifeCounterHTML(){
   const p=state.play;
   let h=`<div class="play-ctrl">
       <div class="pc-group"><span class="pc-lbl">Players</span>${[2,3,4].map(n=>`<button class="pc-btn ${p.count===n?'on':''}" onclick="setPlayers(${n})">${n}</button>`).join('')}</div>
@@ -605,7 +630,7 @@ function renderPlay(){
       <div class="counters">${ctr}</div>
     </div>`;
   }
-  main.innerHTML=h;
+  return h;
 }
 function setPlayers(n){ state.play.count=n; resetLife(); }
 function setStart(s){ state.play.start=s; resetLife(); }
@@ -625,6 +650,99 @@ function cmdDmg(i,j,d){
   p.cmd[i][j]=nv;
   p.life[i]=(p.life[i]||0)-applied; // commander damage is combat damage — also lowers life
   renderPlay();
+}
+
+// ---------- PLAY: solo Commander playtest ----------
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
+function deckPickerHTML(){
+  const decks=state.decks.filter(d=>d.format==='Commander');
+  if(!decks.length) return `<div class="empty"><div class="big">▶</div><div class="t">No Commander decks yet</div><div class="tiny">Create or import a Commander deck, then play it here.</div></div>`;
+  let h=`<div class="section-title">Choose a Commander deck to play</div>`;
+  decks.forEach(d=>{
+    const cmd=d.commander&&card(d.commander);
+    h+=`<div class="decktile" onclick="startGame('${d.id}')"><div class="col">
+      <div class="dn">${esc(d.name)}</div>
+      <div class="ds">${cmd?'👑 '+esc(cmd.name):'No commander set'} · ${deckCardCount(d)} cards</div>
+    </div><div style="font-size:20px;color:var(--muted)">▶</div></div>`;
+  });
+  return h;
+}
+function startGame(deckId){
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  const lib=[];
+  for(const cid in d.cards){ for(let k=0;k<d.cards[cid];k++) lib.push({iid:uid(),cardId:cid}); }
+  shuffle(lib);
+  state.game={ deckId, deckName:d.name, commanderId:d.commander||null, turn:1, life:40,
+    library:lib, hand:[], battlefield:[], graveyard:[], exile:[],
+    command:d.commander?[{iid:uid(),cardId:d.commander}]:[], cmdTax:0, mulligans:0 };
+  for(let i=0;i<7;i++) gameDraw();
+  render();
+}
+function gameDraw(){ const g=state.game; if(g.library.length){ g.hand.push(g.library.shift()); return true; } return false; }
+function gameDrawBtn(){ if(!gameDraw()) toast('Library is empty!'); render(); }
+function gameNextTurn(){ const g=state.game; g.turn++; g.battlefield.forEach(c=>c.tapped=false); const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
+function gameLife(d){ state.game.life+=d; render(); }
+function gameShuffle(){ shuffle(state.game.library); toast('Library shuffled'); }
+function exitGame(){ if(confirm('Leave this game? Your saved deck is untouched — only this play session is discarded.')){ state.game=null; render(); } }
+function gameMulligan(){
+  const g=state.game;
+  const all=[...g.library,...g.hand,...g.battlefield,...g.graveyard,...g.exile].map(c=>({iid:c.iid,cardId:c.cardId}));
+  g.library=shuffle(all); g.hand=[]; g.battlefield=[]; g.graveyard=[]; g.exile=[];
+  g.turn=1; g.life=40; g.cmdTax=0; g.mulligans++;
+  g.command=g.commanderId?[{iid:uid(),cardId:g.commanderId}]:[];
+  for(let i=0;i<7;i++) gameDraw();
+  toast('Mulligan #'+g.mulligans); render();
+}
+function gameMove(iid,from,to){
+  const g=state.game, arr=g[from], idx=arr.findIndex(c=>c.iid===iid); if(idx<0) return;
+  const c=arr.splice(idx,1)[0];
+  if(to==='battlefield'){ c.tapped=false; g.battlefield.push(c); }
+  else if(to==='libraryTop'){ delete c.tapped; g.library.unshift(c); }
+  else if(to==='libraryBottom'){ delete c.tapped; g.library.push(c); }
+  else { delete c.tapped; g[to].push(c); }
+  closeModal(); render();
+}
+function gameTap(iid){ const c=state.game.battlefield.find(x=>x.iid===iid); if(c) c.tapped=!c.tapped; closeModal(); render(); }
+function castCommander(iid){ state.game.cmdTax+=2; gameMove(iid,'command','battlefield'); }
+function gameCardMenu(iid,zone){
+  const g=state.game, c=g[zone].find(x=>x.iid===iid); if(!c) return;
+  const cd=card(c.cardId), img=cd?(cd.img||cd.thumb):'';
+  let acts=[];
+  if(zone==='hand') acts=[['▶ Play to battlefield',`gameMove('${iid}','hand','battlefield')`],['⚰ Discard',`gameMove('${iid}','hand','graveyard')`],['✦ Exile',`gameMove('${iid}','hand','exile')`],['↧ Bottom of library',`gameMove('${iid}','hand','libraryBottom')`]];
+  else if(zone==='battlefield'){ acts=[[c.tapped?'↺ Untap':'⟳ Tap',`gameTap('${iid}')`],['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`],['↩ Return to hand',`gameMove('${iid}','battlefield','hand')`],['✦ Exile',`gameMove('${iid}','battlefield','exile')`]]; if(c.cardId===g.commanderId) acts.push(['👑 To command zone',`gameMove('${iid}','battlefield','command')`]); }
+  else if(zone==='graveyard') acts=[['↩ Return to hand',`gameMove('${iid}','graveyard','hand')`],['▶ To battlefield',`gameMove('${iid}','graveyard','battlefield')`],['↥ Top of library',`gameMove('${iid}','graveyard','libraryTop')`],['✦ Exile',`gameMove('${iid}','graveyard','exile')`]];
+  else if(zone==='exile') acts=[['↩ Return to hand',`gameMove('${iid}','exile','hand')`],['▶ To battlefield',`gameMove('${iid}','exile','battlefield')`]];
+  else if(zone==='command') acts=[['👑 Cast (to battlefield)',`castCommander('${iid}')`]];
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>${cd?esc(cd.name):'Card'}</h3>
+    ${img?`<img src="${img}" style="width:150px;border-radius:11px;display:block;margin:0 auto 14px">`:''}
+    <div class="addmenu">${acts.map(a=>`<button class="btn full" onclick="${a[1]}">${a[0]}</button>`).join('')}
+    <button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div></div>`;
+}
+function gameCardHTML(c,zone){
+  const cd=card(c.cardId);
+  return `<div class="gcard${c.tapped?' tapped':''}" style="background-image:url('${cd?(cd.thumb||cd.img):''}')" onclick="gameCardMenu('${c.iid}','${zone}')"></div>`;
+}
+function renderGame(){
+  const g=state.game;
+  const zc=(arr,zone)=>arr.map(c=>gameCardHTML(c,zone)).join('')||'<div class="tiny muted" style="padding:6px">— empty —</div>';
+  let h=`<div class="game-top">
+      <button class="back" onclick="exitGame()">‹</button>
+      <div class="ttl">${esc(g.deckName)}</div>
+      <span class="turn-badge">Turn ${g.turn}</span>
+    </div>
+    <div class="game-bar">
+      <div class="gcount">❤ <button class="iconbtn" onclick="gameLife(-1)">−</button><b style="min-width:28px;text-align:center">${g.life}</b><button class="iconbtn" onclick="gameLife(1)">＋</button></div>
+      <button class="btn gold sm" onclick="gameNextTurn()">▶ Next turn</button>
+      <button class="btn sm" onclick="gameMulligan()">↺ Mulligan</button>
+    </div>`;
+  if(g.command.length) h+=`<div class="zone"><div class="zone-h"><span>Command Zone${g.cmdTax?` · tax +${g.cmdTax}`:''}</span></div><div class="zone-cards">${zc(g.command,'command')}</div></div>`;
+  h+=`<div class="zone bf"><div class="zone-h"><span>Battlefield (${g.battlefield.length})</span></div><div class="zone-cards">${zc(g.battlefield,'battlefield')}</div></div>`;
+  h+=`<div class="zone"><div class="zone-h"><span>Hand (${g.hand.length})</span></div><div class="zone-cards">${zc(g.hand,'hand')}</div></div>`;
+  h+=`<div class="game-bar"><div class="gcount">Library <b>${g.library.length}</b><button class="btn sm" onclick="gameDrawBtn()">Draw</button><button class="btn sm" onclick="gameShuffle()">Shuffle</button></div></div>`;
+  if(g.graveyard.length) h+=`<div class="zone"><div class="zone-h"><span>Graveyard (${g.graveyard.length})</span></div><div class="zone-cards">${zc(g.graveyard,'graveyard')}</div></div>`;
+  if(g.exile.length) h+=`<div class="zone"><div class="zone-h"><span>Exile (${g.exile.length})</span></div><div class="zone-cards">${zc(g.exile,'exile')}</div></div>`;
+  main.innerHTML=h;
 }
 
 // ============================================================
@@ -1150,7 +1268,8 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   openImport,runImport,loadPrecon,
-  setPlayers,setStart,resetLife,life,poison,cmdDmg});
+  setPlayers,setStart,resetLife,life,poison,cmdDmg,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu});
 
 render();
 
