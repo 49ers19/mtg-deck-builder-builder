@@ -290,10 +290,12 @@ function cacheCard(c){
       thumb:(c.image_uris&&c.image_uris.small) || (c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small) || '',
       set:(c.set||'').toUpperCase(), rarity:c.rarity||'', price:(c.prices&&c.prices.usd)||null,
       produced:c.produced_mana||[],
+      text: oracleText(c),
     };
   }
   return state.cards[c.id];
 }
+function oracleText(c){ if(c.oracle_text!=null) return c.oracle_text; if(c.card_faces) return c.card_faces.map(f=>f.oracle_text||'').join(' // '); return ''; }
 const card = id => state.cards[id];
 
 // ---------- Toast ----------
@@ -701,7 +703,23 @@ function startGame(deckId){
     landsThisTurn:0, landLimit:1, phase:3, pool:emptyPool() };
   for(let i=0;i<7;i++) gameDraw();
   render();
+  enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[]));
 }
+async function enrichGameCards(ids){
+  const missing=[...new Set(ids)].filter(id=>state.cards[id] && state.cards[id].text===undefined);
+  if(!missing.length) return;
+  for(let i=0;i<missing.length;i+=75){
+    const chunk=missing.slice(i,i+75);
+    try{
+      const r=await fetch('https://api.scryfall.com/cards/collection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifiers:chunk.map(id=>({id}))})});
+      const d=await r.json();
+      (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); } });
+    }catch(e){}
+  }
+  DB.save(); if(state.game) render();
+}
+function hasUntapEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /untap/i.test(cd.text||''); }); }
+function gameUntapInfo(){ toast('Stays tapped until your untap step — play a card with an untap ability to untap it sooner'); }
 function gameDraw(){ const g=state.game; if(g.library.length){ g.hand.push(g.library.shift()); return true; } return false; }
 function gameDrawBtn(){ if(!gameDraw()) toast('Library is empty!'); render(); }
 const PHASES=['Untap','Upkeep','Draw','Main 1','Combat','Main 2','End'];
@@ -797,7 +815,15 @@ function gameCardMenu(iid,zone){
     else acts=[['▶ Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):''),`castFromHand('${iid}',false)`],['▶ Play (ignore mana)',`castFromHand('${iid}',true)`]];
     acts.push(['⚰ Discard',`gameMove('${iid}','hand','graveyard')`],['✦ Exile',`gameMove('${iid}','hand','exile')`],['↧ Bottom of library',`gameMove('${iid}','hand','libraryBottom')`]);
   }
-  else if(zone==='battlefield'){ acts=[]; if(canTapMana&&!c.tapped) acts.push(['🔵 Tap for mana',`tapForMana('${iid}')`]); acts.push(c.tapped?['↺ Untap (ability only)',`gameTap('${iid}')`]:['⟳ Tap',`gameTap('${iid}')`],['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`],['↩ Return to hand',`gameMove('${iid}','battlefield','hand')`],['✦ Exile',`gameMove('${iid}','battlefield','exile')`]); if(c.cardId===g.commanderId) acts.push(['👑 To command zone',`gameMove('${iid}','battlefield','command')`]); }
+  else if(zone==='battlefield'){
+    acts=[];
+    if(canTapMana&&!c.tapped) acts.push(['🔵 Tap for mana',`tapForMana('${iid}')`]);
+    if(!c.tapped) acts.push(['⟳ Tap',`gameTap('${iid}')`]);
+    else if(hasUntapEnabler()) acts.push(['↺ Untap (you control an untap ability)',`gameTap('${iid}')`]);
+    else acts.push(['🔒 Stays tapped — no untap card in play',`gameUntapInfo()`]);
+    acts.push(['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`],['↩ Return to hand',`gameMove('${iid}','battlefield','hand')`],['✦ Exile',`gameMove('${iid}','battlefield','exile')`]);
+    if(c.cardId===g.commanderId) acts.push(['👑 To command zone',`gameMove('${iid}','battlefield','command')`]);
+  }
   else if(zone==='graveyard') acts=[['↩ Return to hand',`gameMove('${iid}','graveyard','hand')`],['▶ To battlefield',`gameMove('${iid}','graveyard','battlefield')`],['↥ Top of library',`gameMove('${iid}','graveyard','libraryTop')`],['✦ Exile',`gameMove('${iid}','graveyard','exile')`]];
   else if(zone==='exile') acts=[['↩ Return to hand',`gameMove('${iid}','exile','hand')`],['▶ To battlefield',`gameMove('${iid}','exile','battlefield')`]];
   else if(zone==='command') acts=[['👑 Cast (to battlefield)',`castCommander('${iid}')`]];
@@ -1443,7 +1469,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,castFromHand,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,castFromHand,gameUntapInfo,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
