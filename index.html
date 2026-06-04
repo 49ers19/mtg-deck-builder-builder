@@ -867,7 +867,8 @@ function gameCardMenu(iid,zone){
   if(zone==='hand'){
     if(isLand) acts=[['▶ Play to battlefield',`gameMove('${iid}','hand','battlefield')`],['🌍 Play as extra land (ability)',`playExtraLand('${iid}')`]];
     else acts=[['▶ Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):''),`castFromHand('${iid}',false)`]];
-    acts.push(['⚰ Discard',`gameMove('${iid}','hand','graveyard')`],['✦ Exile',`gameMove('${iid}','hand','exile')`],['↧ Bottom of library',`gameMove('${iid}','hand','libraryBottom')`]);
+    acts.push(['↧ Bottom of library',`gameMove('${iid}','hand','libraryBottom')`]);
+    if(g.hand.length>7) acts.push(['⚰ Discard (hand over 7)',`gameMove('${iid}','hand','graveyard')`]);
   }
   else if(zone==='battlefield'){
     acts=[];
@@ -1039,6 +1040,10 @@ function singletonBlocked(obj, cardId, deck){
   if(/any number of cards named/i.test(txt)) return false; // Relentless Rats etc.
   return true;
 }
+function syncCollectionToDeck(deck, cardId){
+  const need=deck.cards[cardId]||0;
+  if((state.collection[cardId]||0) < need) state.collection[cardId]=need; // own at least what the deck uses
+}
 function addToDeckDirect(deckId,cardId){
   const c=state._resultMap&&state._resultMap[cardId];
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
@@ -1046,6 +1051,7 @@ function addToDeckDirect(deckId,cardId){
   if(singletonBlocked(c,cardId,d)){ toast('Singleton format — only one copy (basics excepted)'); return; }
   if(c) cacheCard(c);
   d.cards[cardId]=(d.cards[cardId]||0)+1;
+  syncCollectionToDeck(d,cardId);
   DB.save(); toast('Added to '+d.name); renderSearch();
 }
 function finishAdding(){ state.addToDeckId=null; state.tab='decks'; render(); }
@@ -1277,6 +1283,7 @@ function deckQty(deckId,cardId,delta){
   if(delta>0 && singletonBlocked(null,cardId,d)){ toast('Singleton format — only one copy (basics excepted)'); return; }
   d.cards[cardId]=(d.cards[cardId]||0)+delta;
   if(d.cards[cardId]<=0) delete d.cards[cardId];
+  else if(delta>0) syncCollectionToDeck(d,cardId);
   DB.save(); renderDeckDetail();
 }
 function collQty(cardId,delta){
@@ -1297,6 +1304,7 @@ function addToDeck(cardId, deckId){
   if(singletonBlocked(c,cardId,d)){ toast('Singleton format — only one copy (basics excepted)'); closeModal(); return; }
   if(c) cacheCard(c);
   d.cards[cardId]=(d.cards[cardId]||0)+1;
+  syncCollectionToDeck(d,cardId);
   DB.save(); toast('Added to '+d.name); closeModal();
 }
 
@@ -1442,6 +1450,15 @@ function binarize(ctx,canvas){
   ctx.putImageData(img,0,0);
 }
 
+let _ocrWorker=null;
+async function getOcrWorker(){
+  await loadTesseract();
+  if(!_ocrWorker){
+    _ocrWorker = await Tesseract.createWorker('eng');
+    try{ await _ocrWorker.setParameters({ tessedit_pageseg_mode:'7', tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ',-" }); }catch(e){}
+  }
+  return _ocrWorker;
+}
 function cleanName(t){
   const line=(t||'').split('\n').map(s=>s.trim()).filter(s=>s.length>1)[0]||'';
   return line.replace(/[^A-Za-z',\- ]/g,'').replace(/\s+/g,' ').trim();
@@ -1456,18 +1473,19 @@ async function captureScan(){
   try{
     const g=$('#scanGuide').getBoundingClientRect();
     const vr=video.getBoundingClientRect();
-    const dx=(g.left-vr.left)+g.width*0.05;
-    const dy=(g.top-vr.top)+g.height*0.04;
-    const src=displayToSource(video,dx,dy,g.width*0.78,g.height*0.12);
+    const dx=(g.left-vr.left)+g.width*0.045;
+    const dy=(g.top-vr.top)+g.height*0.035;
+    const src=displayToSource(video,dx,dy,g.width*0.80,g.height*0.135);
     const canvas=document.createElement('canvas');
-    canvas.width=640; canvas.height=Math.max(40,Math.round(640*src.h/src.w));
+    canvas.width=1100; canvas.height=Math.max(60,Math.round(1100*src.h/src.w));
     const cx=canvas.getContext('2d');
+    cx.imageSmoothingEnabled=true; cx.imageSmoothingQuality='high';
     cx.drawImage(video,src.x,src.y,src.w,src.h,0,0,canvas.width,canvas.height);
     binarize(cx,canvas);
-    await loadTesseract();
-    const {data}=await Tesseract.recognize(canvas,'eng');
+    const worker=await getOcrWorker();
+    const {data}=await worker.recognize(canvas);
     const name=cleanName(data.text);
-    if(!name){ setScanStatus('Couldn’t read the name — reposition and retry',false); return; }
+    if(!name){ setScanStatus('Couldn’t read the name — fill the gold strip with just the title and retry',false); return; }
     await matchScan(name);
   }catch(e){
     setScanStatus('Scan failed — try again',false);
@@ -1484,6 +1502,13 @@ async function scryNamed(name){
 async function matchScan(name){
   setScanStatus('Matching “'+name+'”…',true);
   let c=await scryNamed(name);
+  if(!c){
+    // autocomplete: snap a partial/garbled read to the closest real card name
+    try{
+      const r=await fetch('https://api.scryfall.com/cards/autocomplete?q='+encodeURIComponent(name));
+      if(r.ok){ const d=await r.json(); if(d.data&&d.data[0]) c=await scryNamed(d.data[0]); }
+    }catch(e){}
+  }
   if(!c){
     try{ const r=await fetch('https://api.scryfall.com/cards/search?q='+encodeURIComponent(name)); if(r.ok){ const d=await r.json(); c=(d.data||[])[0]; } }catch(e){}
   }
