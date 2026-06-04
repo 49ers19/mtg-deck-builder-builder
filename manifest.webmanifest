@@ -1,6 +1,6 @@
 {
-  "name": "Planar Deckbox",
-  "short_name": "Deckbox",
+  "name": "Grimoire Games",
+  "short_name": "Grimoire",
   "description": "Magic: The Gathering deck builder & collection tracker",
   "start_url": "./",
   "scope": "./",

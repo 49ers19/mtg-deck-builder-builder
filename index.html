@@ -7,10 +7,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0d0f1a">
-<meta name="apple-mobile-web-app-title" content="Deckbox">
+<meta name="apple-mobile-web-app-title" content="Grimoire">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>Planar Deckbox — MTG Deck Builder</title>
+<title>Grimoire Games — MTG Deck Builder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -243,7 +243,7 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 </head>
 <body>
 <header>
-  <div class="brand"><span class="gem"></span>Planar Deckbox</div>
+  <div class="brand"><span class="gem"></span>Grimoire Games</div>
   <div class="sub" id="subtitle">Magic: The Gathering deck builder &amp; collection</div>
   <button id="installBtn" class="install-btn hidden" onclick="installApp()">⤓ Install</button>
 </header>
@@ -263,7 +263,7 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 
 <script>
 // ============================================================
-//  PLANAR DECKBOX — MTG deck builder + collection tracker
+//  GRIMOIRE GAMES — MTG deck builder + collection tracker
 //  Single-file app. Data in localStorage. Cards via Scryfall.
 // ============================================================
 const $ = (s,el=document)=>el.querySelector(s);
@@ -757,7 +757,7 @@ window.addEventListener('appinstalled',()=>{ const b=$('#installBtn'); if(b) b.c
 function installApp(){
   if(deferredPrompt){ deferredPrompt.prompt(); deferredPrompt.userChoice.finally(()=>{ deferredPrompt=null; const b=$('#installBtn'); if(b) b.classList.add('hidden'); }); return; }
   const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Install Planar Deckbox</h3><div class="tiny" style="line-height:1.7">${ios?'On iPhone/iPad (Safari): tap the <b>Share</b> button (□↑), then <b>Add to Home Screen</b>.':'Phone: open your browser menu (⋮) → <b>Install app</b> / <b>Add to Home screen</b>.<br><br>Computer (Chrome/Edge): click the <b>install icon</b> (⊕ / monitor) at the right of the address bar, or menu → <b>Install Planar Deckbox</b>.'}</div><button class="btn gold full" style="margin-top:14px" onclick="closeModal()">Got it</button></div></div>`;
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Install Grimoire Games</h3><div class="tiny" style="line-height:1.7">${ios?'On iPhone/iPad (Safari): tap the <b>Share</b> button (□↑), then <b>Add to Home Screen</b>.':'Phone: open your browser menu (⋮) → <b>Install app</b> / <b>Add to Home screen</b>.<br><br>Computer (Chrome/Edge): click the <b>install icon</b> (⊕ / monitor) at the right of the address bar, or menu → <b>Install Grimoire Games</b>.'}</div><button class="btn gold full" style="margin-top:14px" onclick="closeModal()">Got it</button></div></div>`;
 }
 
 // ---------- PLAY (life counter) ----------
