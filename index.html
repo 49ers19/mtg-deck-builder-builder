@@ -738,6 +738,7 @@ async function enrichGameCards(ids){
 }
 function hasUntapEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /untap/i.test(cd.text||''); }); }
 function hasReturnEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /(return[^.]{0,80}hand|to (its|their) owner'?s hand|to your hand|to (its|their) hand)/i.test(cd.text||''); }); }
+function hasLandEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /additional land/i.test(cd.text||''); }); }
 function classifyAbility(ab){
   if(/^(When|Whenever|At )/i.test(ab)) return 'triggered';
   const ci=ab.indexOf(':');
@@ -837,7 +838,12 @@ function castFromHand(iid, ignoreMana){
   closeModal(); render();
 }
 function gameLandLimit(d){ const g=state.game; g.landLimit=Math.max(1,(g.landLimit||1)+d); render(); }
-function playExtraLand(iid){ state.game.landLimit=(state.game.landLimit||1)+1; gameMove(iid,'hand','battlefield'); }
+function playExtraLand(iid){
+  const g=state.game, idx=g.hand.findIndex(x=>x.iid===iid); if(idx<0){ closeModal(); return; }
+  const moved=g.hand.splice(idx,1)[0]; moved.tapped=false; g.battlefield.push(moved);
+  g.landsThisTurn=(g.landsThisTurn||0)+1; // bypasses the one-per-turn limit (you control an "additional land" card)
+  toast('Extra land played'); closeModal(); render();
+}
 function gameLife(d){ state.game.life+=d; render(); }
 function oppDamage(d){ const g=state.game; g.oppLife=(g.oppLife||0)-d; if(g.oppLife<=0){ g.oppLife=0; toast('🏆 Opponent defeated — you win!'); } render(); }
 function oppSet(){ const v=window.prompt('Set opponent life (training dummy):','1000'); if(v===null) return; const n=parseInt(v,10); if(!isNaN(n)){ state.game.oppLife=n; render(); } }
@@ -910,7 +916,7 @@ function gameCardMenu(iid,zone){
   const canTapMana = cd && (isLand || (cd.produced&&cd.produced.length));
   let acts=[];
   if(zone==='hand'){
-    if(isLand) acts=[['▶ Play to battlefield',`gameMove('${iid}','hand','battlefield')`],['🌍 Play as extra land (ability)',`playExtraLand('${iid}')`]];
+    if(isLand){ acts=[['▶ Play to battlefield',`gameMove('${iid}','hand','battlefield')`]]; if(hasLandEnabler()) acts.push(['🌍 Play as extra land (you control an additional-land card)',`playExtraLand('${iid}')`]); }
     else acts=[['▶ Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):''),`castFromHand('${iid}',false)`]];
     acts.push(['↧ Bottom of library',`gameMove('${iid}','hand','libraryBottom')`]);
     if(g.hand.length>7) acts.push(['⚰ Discard (hand over 7)',`gameMove('${iid}','hand','graveyard')`]);
@@ -976,7 +982,7 @@ function renderGame(){
       <button class="btn gold sm" onclick="gameNextPhase()">▶ Next phase</button>
       <button class="btn sm" onclick="gameNextTurn()">⏭ Next turn</button>
       <button class="btn sm" onclick="gameMulligan()">↺ Mulligan</button>
-      <div class="gcount">🌍 ${g.landsThisTurn||0}/${g.landLimit||1}<button class="iconbtn" onclick="gameLandLimit(-1)">−</button><button class="iconbtn" onclick="gameLandLimit(1)">＋</button></div>
+      <div class="gcount">🌍 Lands ${g.landsThisTurn||0}/${g.landLimit||1}</div>
     </div>
     <div class="mana-bar">${showColors.map(m=>`<span class="mana mana-${m}">${m} <b>${(g.pool&&g.pool[m])||0}</b></span>`).join('')}<button class="mana mana-clr" onclick="clearPool()" title="Empty pool">✕</button></div>
     <div class="opp-panel"><div><div class="opp-l">🎯 Training Opponent</div><div class="opp-v ${(g.oppLife||0)<=0?'dead':''}">${g.oppLife||0}</div></div><div class="opp-btns"><button class="btn sm" onclick="oppDamage(1)">−1</button><button class="btn sm" onclick="oppDamage(5)">−5</button><button class="btn sm" onclick="oppDamage(10)">−10</button><button class="btn sm" onclick="oppSet()">Set</button></div></div>`;
