@@ -213,6 +213,8 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .gcard.noimg{display:flex;align-items:center;justify-content:center;padding:3px;background:var(--panel2)}
 .gcard-lbl{font-size:8px;line-height:1.1;font-weight:700;color:var(--text);text-align:center;overflow:hidden}
 .card-text{font-size:12px;line-height:1.5;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:14px;max-height:170px;overflow-y:auto;white-space:pre-wrap}
+.abil{display:flex;align-items:flex-start;gap:8px;text-align:left;white-space:normal;font-weight:500;font-size:12px;line-height:1.45;padding:10px 12px;margin-bottom:7px}
+.abil-tag{flex:0 0 auto;font-size:9px;font-weight:800;color:var(--accent2);background:rgba(201,162,39,.15);border-radius:4px;padding:2px 5px;margin-top:1px}
 .opp-panel{display:flex;align-items:center;justify-content:space-between;gap:10px;background:linear-gradient(135deg,#2a1d22,#1b1518);border:1px solid var(--danger);border-radius:14px;padding:11px 13px;margin-bottom:12px}
 .opp-l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
 .opp-v{font-family:'Cinzel',serif;font-weight:700;font-size:30px;color:var(--danger);line-height:1.1}
@@ -823,6 +825,16 @@ function gameMove(iid,from,to){
   closeModal(); render();
 }
 function creaturePower(cd){ const p=parseInt(cd&&cd.power,10); return isNaN(p)?0:Math.max(0,p); }
+function useAbility(iid, zone, idx){
+  const g=state.game, c=g[zone]&&g[zone].find(x=>x.iid===iid); if(!c){ closeModal(); return; }
+  const cd=card(c.cardId), lines=((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const ab=lines[idx]||''; if(!ab){ closeModal(); return; }
+  const trig=/^(When|Whenever|At )/i.test(ab);
+  const cost=ab.split(':')[0]||'';
+  if(zone==='battlefield' && /\{T\}/.test(cost) && !c.tapped) c.tapped=true; // pay the tap cost
+  toast((trig?'⚡ Triggered: ':'⚡ Used: ')+(ab.length>44?ab.slice(0,44)+'…':ab));
+  closeModal(); render();
+}
 function gameTap(iid){
   const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c){ closeModal(); return; }
   if(c.tapped){ c.tapped=false; toast('Untapped (ability)'); closeModal(); render(); return; }
@@ -869,11 +881,15 @@ function gameCardMenu(iid,zone){
   else if(zone==='graveyard') acts=[['↩ Return to hand',`gameMove('${iid}','graveyard','hand')`],['▶ To battlefield',`gameMove('${iid}','graveyard','battlefield')`],['↥ Top of library',`gameMove('${iid}','graveyard','libraryTop')`],['✦ Exile',`gameMove('${iid}','graveyard','exile')`]];
   else if(zone==='exile') acts=[['↩ Return to hand',`gameMove('${iid}','exile','hand')`],['▶ To battlefield',`gameMove('${iid}','exile','battlefield')`]];
   else if(zone==='command'){ const tax=g.cmdTax||0; acts=[['👑 Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):'')+(tax?' +{'+tax+'}':''),`castCommander('${iid}',false)`]]; }
+  const abLines=(cd&&cd.text)?cd.text.split('\n').map(s=>s.trim()).filter(Boolean):[];
+  const abilitiesHTML = abLines.length
+    ? `<div class="section-title" style="margin:2px 2px 6px">Abilities — tap one to use</div>`+abLines.map((ab,i)=>{ const trig=/^(When|Whenever|At )/i.test(ab); return `<button class="btn full abil" onclick="useAbility('${iid}','${zone}',${i})"><span class="abil-tag">${trig?'TRIGGER':'USE'}</span><span>${esc(ab)}</span></button>`; }).join('')
+    : '';
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
     <h3>${cd?esc(cd.name):'Card'}</h3>
     ${img?`<img src="${img}" style="width:150px;border-radius:11px;display:block;margin:0 auto 12px">`:''}
     ${cd&&cd.type_line?`<div class="tiny muted" style="text-align:center;margin-bottom:8px">${esc(cd.type_line)}${cd.mana_cost?' · '+manaText(cd.mana_cost):''}</div>`:''}
-    ${cd&&cd.text?`<div class="card-text">${esc(cd.text)}</div>`:''}
+    ${abilitiesHTML}
     <div class="addmenu">${acts.map(a=>`<button class="btn full" onclick="${a[1]}">${a[0]}</button>`).join('')}
     <button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div></div>`;
 }
@@ -892,6 +908,9 @@ function createToken(){
 function renderGame(){
   const g=state.game;
   const zc=(arr,zone)=>arr.map(c=>gameCardHTML(c,zone)).join('')||'<div class="tiny muted" style="padding:6px">— empty —</div>';
+  const cmdCard=g.commanderId?card(g.commanderId):null;
+  const cmdCI=(cmdCard&&((cmdCard.ci&&cmdCard.ci.length)?cmdCard.ci:cmdCard.colors))||[];
+  const showColors=cmdCI.length?[...['W','U','B','R','G'].filter(m=>cmdCI.includes(m)),'C']:MANA_COLORS;
   let h=`<div class="game-top">
       <button class="back" onclick="exitGame()">‹</button>
       <div class="ttl">${esc(g.deckName)}</div>
@@ -905,7 +924,7 @@ function renderGame(){
       <button class="btn sm" onclick="gameMulligan()">↺ Mulligan</button>
       <div class="gcount">🌍 ${g.landsThisTurn||0}/${g.landLimit||1}<button class="iconbtn" onclick="gameLandLimit(-1)">−</button><button class="iconbtn" onclick="gameLandLimit(1)">＋</button></div>
     </div>
-    <div class="mana-bar">${MANA_COLORS.map(m=>`<span class="mana mana-${m}">${m} <b>${(g.pool&&g.pool[m])||0}</b></span>`).join('')}<button class="mana mana-clr" onclick="clearPool()" title="Empty pool">✕</button></div>
+    <div class="mana-bar">${showColors.map(m=>`<span class="mana mana-${m}">${m} <b>${(g.pool&&g.pool[m])||0}</b></span>`).join('')}<button class="mana mana-clr" onclick="clearPool()" title="Empty pool">✕</button></div>
     <div class="opp-panel"><div><div class="opp-l">🎯 Training Opponent</div><div class="opp-v ${(g.oppLife||0)<=0?'dead':''}">${g.oppLife||0}</div></div><div class="opp-btns"><button class="btn sm" onclick="oppDamage(1)">−1</button><button class="btn sm" onclick="oppDamage(5)">−5</button><button class="btn sm" onclick="oppDamage(10)">−10</button><button class="btn sm" onclick="oppSet()">Set</button></div></div>`;
   if(g.command.length) h+=`<div class="zone"><div class="zone-h"><span>Command Zone${g.cmdTax?` · tax +${g.cmdTax}`:''}</span></div><div class="zone-cards">${zc(g.command,'command')}</div></div>`;
   h+=`<div class="zone bf"><div class="zone-h"><span>Battlefield (${g.battlefield.length})</span></div><div class="zone-cards">${zc(g.battlefield,'battlefield')}</div></div>`;
@@ -1011,10 +1030,20 @@ function offColor(obj, cardId, deck){
   const ci=(obj&&obj.color_identity)||(card(cardId)&&card(cardId).ci)||[];
   return !withinIdentity(ci, allowed);
 }
+function singletonBlocked(obj, cardId, deck){
+  if(!deck || deck.format!=='Commander') return false;
+  if(!((deck.cards[cardId]||0)>=1)) return false; // not already in the deck
+  const tl=(obj&&obj.type_line)||(card(cardId)&&card(cardId).type_line)||'';
+  if(/\bBasic\b/.test(tl)) return false; // basics are unlimited
+  const txt=(obj&&obj.oracle_text)||(card(cardId)&&card(cardId).text)||'';
+  if(/any number of cards named/i.test(txt)) return false; // Relentless Rats etc.
+  return true;
+}
 function addToDeckDirect(deckId,cardId){
   const c=state._resultMap&&state._resultMap[cardId];
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
   if(offColor(c,cardId,d)){ toast('Outside '+(card(d.commander)?card(d.commander).name:'your commander')+'’s color identity'); return; }
+  if(singletonBlocked(c,cardId,d)){ toast('Singleton format — only one copy (basics excepted)'); return; }
   if(c) cacheCard(c);
   d.cards[cardId]=(d.cards[cardId]||0)+1;
   DB.save(); toast('Added to '+d.name); renderSearch();
@@ -1245,6 +1274,7 @@ async function loadPrecon(i){
 
 function deckQty(deckId,cardId,delta){
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  if(delta>0 && singletonBlocked(null,cardId,d)){ toast('Singleton format — only one copy (basics excepted)'); return; }
   d.cards[cardId]=(d.cards[cardId]||0)+delta;
   if(d.cards[cardId]<=0) delete d.cards[cardId];
   DB.save(); renderDeckDetail();
@@ -1264,6 +1294,7 @@ function addToDeck(cardId, deckId){
   const c = state._resultMap&&state._resultMap[cardId];
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
   if(offColor(c,cardId,d)){ toast('Outside '+(card(d.commander)?card(d.commander).name:'your commander')+'’s color identity'); closeModal(); return; }
+  if(singletonBlocked(c,cardId,d)){ toast('Singleton format — only one copy (basics excepted)'); closeModal(); return; }
   if(c) cacheCard(c);
   d.cards[cardId]=(d.cards[cardId]||0)+1;
   DB.save(); toast('Added to '+d.name); closeModal();
@@ -1537,7 +1568,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,castFromHand,gameUntapInfo,createToken,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,castFromHand,gameUntapInfo,createToken,useAbility,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
