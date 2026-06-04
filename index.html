@@ -687,13 +687,16 @@ function startGame(deckId){
   shuffle(lib);
   state.game={ deckId, deckName:d.name, commanderId:d.commander||null, turn:1, life:40,
     library:lib, hand:[], battlefield:[], graveyard:[], exile:[],
-    command:d.commander?[{iid:uid(),cardId:d.commander}]:[], cmdTax:0, mulligans:0 };
+    command:d.commander?[{iid:uid(),cardId:d.commander}]:[], cmdTax:0, mulligans:0,
+    landsThisTurn:0, landLimit:1 };
   for(let i=0;i<7;i++) gameDraw();
   render();
 }
 function gameDraw(){ const g=state.game; if(g.library.length){ g.hand.push(g.library.shift()); return true; } return false; }
 function gameDrawBtn(){ if(!gameDraw()) toast('Library is empty!'); render(); }
-function gameNextTurn(){ const g=state.game; g.turn++; g.battlefield.forEach(c=>c.tapped=false); const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
+function gameNextTurn(){ const g=state.game; g.turn++; g.battlefield.forEach(c=>c.tapped=false); g.landsThisTurn=0; const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
+function gameLandLimit(d){ const g=state.game; g.landLimit=Math.max(1,(g.landLimit||1)+d); render(); }
+function playExtraLand(iid){ state.game.landLimit=(state.game.landLimit||1)+1; gameMove(iid,'hand','battlefield'); }
 function gameLife(d){ state.game.life+=d; render(); }
 function gameShuffle(){ shuffle(state.game.library); toast('Library shuffled'); }
 function exitGame(){ if(confirm('Leave this game? Your saved deck is untouched — only this play session is discarded.')){ state.game=null; render(); } }
@@ -701,13 +704,20 @@ function gameMulligan(){
   const g=state.game;
   const all=[...g.library,...g.hand,...g.battlefield,...g.graveyard,...g.exile].map(c=>({iid:c.iid,cardId:c.cardId}));
   g.library=shuffle(all); g.hand=[]; g.battlefield=[]; g.graveyard=[]; g.exile=[];
-  g.turn=1; g.life=40; g.cmdTax=0; g.mulligans++;
+  g.turn=1; g.life=40; g.cmdTax=0; g.mulligans++; g.landsThisTurn=0; g.landLimit=1;
   g.command=g.commanderId?[{iid:uid(),cardId:g.commanderId}]:[];
   for(let i=0;i<7;i++) gameDraw();
   toast('Mulligan #'+g.mulligans); render();
 }
 function gameMove(iid,from,to){
   const g=state.game, arr=g[from], idx=arr.findIndex(c=>c.iid===iid); if(idx<0) return;
+  if(from==='hand' && to==='battlefield'){
+    const cd=card(arr[idx].cardId);
+    if(cd && /\bLand\b/.test(cd.type_line||'')){
+      if((g.landsThisTurn||0) >= (g.landLimit||1)){ toast('Only '+(g.landLimit||1)+' land per turn — use the 🌍 ＋ or “extra land” if an ability allows'); closeModal(); return; }
+      g.landsThisTurn=(g.landsThisTurn||0)+1;
+    }
+  }
   const c=arr.splice(idx,1)[0];
   if(to==='battlefield'){ c.tapped=false; g.battlefield.push(c); }
   else if(to==='libraryTop'){ delete c.tapped; g.library.unshift(c); }
@@ -726,6 +736,7 @@ function gameCardMenu(iid,zone){
   else if(zone==='graveyard') acts=[['↩ Return to hand',`gameMove('${iid}','graveyard','hand')`],['▶ To battlefield',`gameMove('${iid}','graveyard','battlefield')`],['↥ Top of library',`gameMove('${iid}','graveyard','libraryTop')`],['✦ Exile',`gameMove('${iid}','graveyard','exile')`]];
   else if(zone==='exile') acts=[['↩ Return to hand',`gameMove('${iid}','exile','hand')`],['▶ To battlefield',`gameMove('${iid}','exile','battlefield')`]];
   else if(zone==='command') acts=[['👑 Cast (to battlefield)',`castCommander('${iid}')`]];
+  if(zone==='hand' && cd && /\bLand\b/.test(cd.type_line||'')) acts.splice(1,0,['🌍 Play as extra land (ability)',`playExtraLand('${iid}')`]);
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
     <h3>${cd?esc(cd.name):'Card'}</h3>
     ${img?`<img src="${img}" style="width:150px;border-radius:11px;display:block;margin:0 auto 14px">`:''}
@@ -748,6 +759,7 @@ function renderGame(){
       <div class="gcount">❤ <button class="iconbtn" onclick="gameLife(-1)">−</button><b style="min-width:28px;text-align:center">${g.life}</b><button class="iconbtn" onclick="gameLife(1)">＋</button></div>
       <button class="btn gold sm" onclick="gameNextTurn()">▶ Next turn</button>
       <button class="btn sm" onclick="gameMulligan()">↺ Mulligan</button>
+      <div class="gcount">🌍 ${g.landsThisTurn||0}/${g.landLimit||1}<button class="iconbtn" onclick="gameLandLimit(-1)">−</button><button class="iconbtn" onclick="gameLandLimit(1)">＋</button></div>
     </div>`;
   if(g.command.length) h+=`<div class="zone"><div class="zone-h"><span>Command Zone${g.cmdTax?` · tax +${g.cmdTax}`:''}</span></div><div class="zone-cards">${zc(g.command,'command')}</div></div>`;
   h+=`<div class="zone bf"><div class="zone-h"><span>Battlefield (${g.battlefield.length})</span></div><div class="zone-cards">${zc(g.battlefield,'battlefield')}</div></div>`;
@@ -1364,7 +1376,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
