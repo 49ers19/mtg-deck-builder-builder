@@ -210,6 +210,9 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .gcard{width:48px;height:67px;border-radius:5px;background:var(--bg2) center/cover;border:1px solid var(--line);cursor:pointer;flex-shrink:0;transition:transform .08s}
 .gcard:active{transform:scale(1.05)}
 .gcard.tapped{opacity:.45;filter:grayscale(.6);transform:rotate(10deg)}
+.gcard.noimg{display:flex;align-items:center;justify-content:center;padding:3px;background:var(--panel2)}
+.gcard-lbl{font-size:8px;line-height:1.1;font-weight:700;color:var(--text);text-align:center;overflow:hidden}
+.card-text{font-size:12px;line-height:1.5;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:14px;max-height:170px;overflow-y:auto;white-space:pre-wrap}
 .phase-bar{display:flex;gap:4px;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .ph{flex:1;text-align:center;font-size:10px;font-weight:700;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 3px;white-space:nowrap;text-transform:uppercase;letter-spacing:.2px}
 .ph.on{background:linear-gradient(180deg,var(--accent2),var(--accent));color:#23200a;border-color:var(--accent)}
@@ -829,13 +832,23 @@ function gameCardMenu(iid,zone){
   else if(zone==='command') acts=[['👑 Cast (to battlefield)',`castCommander('${iid}')`]];
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
     <h3>${cd?esc(cd.name):'Card'}</h3>
-    ${img?`<img src="${img}" style="width:150px;border-radius:11px;display:block;margin:0 auto 14px">`:''}
+    ${img?`<img src="${img}" style="width:150px;border-radius:11px;display:block;margin:0 auto 12px">`:''}
+    ${cd&&cd.type_line?`<div class="tiny muted" style="text-align:center;margin-bottom:8px">${esc(cd.type_line)}${cd.mana_cost?' · '+manaText(cd.mana_cost):''}</div>`:''}
+    ${cd&&cd.text?`<div class="card-text">${esc(cd.text)}</div>`:''}
     <div class="addmenu">${acts.map(a=>`<button class="btn full" onclick="${a[1]}">${a[0]}</button>`).join('')}
     <button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div></div>`;
 }
 function gameCardHTML(c,zone){
-  const cd=card(c.cardId);
-  return `<div class="gcard${c.tapped?' tapped':''}" style="background-image:url('${cd?(cd.thumb||cd.img):''}')" onclick="gameCardMenu('${c.iid}','${zone}')"></div>`;
+  const cd=card(c.cardId); const thumb=cd?(cd.thumb||cd.img):'';
+  return `<div class="gcard${c.tapped?' tapped':''}${thumb?'':' noimg'}" style="background-image:url('${thumb}')" onclick="gameCardMenu('${c.iid}','${zone}')">${thumb?'':`<span class="gcard-lbl">${esc(cd?cd.name:'?')}</span>`}</div>`;
+}
+function createToken(){
+  const name=(window.prompt('Token name (e.g. "1/1 Soldier", "Treasure"):','Token')||'').trim();
+  if(!name) return;
+  const tid='tok-'+uid();
+  state.cards[tid]={id:tid,name,mana_cost:'',cmc:0,type_line:'Token',colors:[],img:'',thumb:'',set:'',produced:[],text:''};
+  state.game.battlefield.push({iid:uid(),cardId:tid,tapped:false});
+  toast('Token created'); render();
 }
 function renderGame(){
   const g=state.game;
@@ -857,7 +870,7 @@ function renderGame(){
   if(g.command.length) h+=`<div class="zone"><div class="zone-h"><span>Command Zone${g.cmdTax?` · tax +${g.cmdTax}`:''}</span></div><div class="zone-cards">${zc(g.command,'command')}</div></div>`;
   h+=`<div class="zone bf"><div class="zone-h"><span>Battlefield (${g.battlefield.length})</span></div><div class="zone-cards">${zc(g.battlefield,'battlefield')}</div></div>`;
   h+=`<div class="zone"><div class="zone-h"><span>Hand (${g.hand.length})</span></div><div class="zone-cards">${zc(g.hand,'hand')}</div></div>`;
-  h+=`<div class="game-bar"><div class="gcount">Library <b>${g.library.length}</b><button class="btn sm" onclick="gameDrawBtn()">Draw</button><button class="btn sm" onclick="gameShuffle()">Shuffle</button></div></div>`;
+  h+=`<div class="game-bar"><div class="gcount">Library <b>${g.library.length}</b><button class="btn sm" onclick="gameDrawBtn()">Draw</button><button class="btn sm" onclick="gameShuffle()">Shuffle</button></div><button class="btn sm" onclick="createToken()">🎲 Token</button></div>`;
   if(g.graveyard.length) h+=`<div class="zone"><div class="zone-h"><span>Graveyard (${g.graveyard.length})</span></div><div class="zone-cards">${zc(g.graveyard,'graveyard')}</div></div>`;
   if(g.exile.length) h+=`<div class="zone"><div class="zone-h"><span>Exile (${g.exile.length})</span></div><div class="zone-cards">${zc(g.exile,'exile')}</div></div>`;
   main.innerHTML=h;
@@ -1469,7 +1482,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,castFromHand,gameUntapInfo,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,castFromHand,gameUntapInfo,createToken,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
