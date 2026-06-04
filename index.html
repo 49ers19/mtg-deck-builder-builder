@@ -893,6 +893,7 @@ function cardCategories(c){
 function hasUntapEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /untap/i.test(cd.text||''); }); }
 function hasReturnEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /(return[^.]{0,80}hand|to (its|their) owner'?s hand|to your hand|to (its|their) hand)/i.test(cd.text||''); }); }
 function hasLandEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /additional land/i.test(cd.text||''); }); }
+function hasDrawEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /draw [^.]{0,18}card/i.test(cd.text||''); }); }
 function classifyAbility(ab){
   if(/^(When|Whenever|At )/i.test(ab)) return 'triggered';
   const ci=ab.indexOf(':');
@@ -910,7 +911,7 @@ function bannedBadge(obj){
 }
 function gameUntapInfo(){ toast('Stays tapped until your untap step — play a card with an untap ability to untap it sooner'); }
 function gameDraw(){ const g=state.game; if(g.library.length){ g.hand.push(g.library.shift()); return true; } return false; }
-function gameDrawBtn(){ if(!gameDraw()) toast('Library is empty!'); render(); }
+function gameDrawBtn(){ if(!hasDrawEnabler()){ toast('You only draw on your draw step — play a card that draws to draw more'); return; } if(!gameDraw()) toast('Library is empty!'); render(); }
 const PHASES=['Untap','Upkeep','Draw','Main 1','Combat','End'];
 const MANA_COLORS=['W','U','B','R','G','C'];
 function emptyPool(){ return {W:0,U:0,B:0,R:0,G:0,C:0}; }
@@ -960,7 +961,7 @@ function tapDo(iid, kind, idx){
   if(kind==='mana'){ tapForMana(iid); return; }
   c.tapped=true;
   if(kind==='attack'){ const pw=creaturePower(card(c.cardId))+(c.counters||0); g.oppLife=(g.oppLife||0)-pw; if(g.oppLife<=0){ g.oppLife=0; toast('🏆 Hit for '+pw+' — opponent defeated!'); } else toast('⚔️ Attacked for '+pw); }
-  else if(kind==='ab'){ const cd=card(c.cardId); const ab=(((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean))[idx]||''; toast('⚡ Used: '+(ab.length>44?ab.slice(0,44)+'…':ab)); }
+  else if(kind==='ab'){ const cd=card(c.cardId); const ab=(((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean))[idx]||''; if(/draw [^.]{0,18}card/i.test(ab)){ gameDraw(); toast('⚡ '+(ab.length>34?ab.slice(0,34)+'…':ab)+' — drew'); } else toast('⚡ Used: '+(ab.length>44?ab.slice(0,44)+'…':ab)); }
   else toast('Tapped');
   closeModal(); render();
 }
