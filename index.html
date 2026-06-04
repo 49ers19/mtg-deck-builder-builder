@@ -294,6 +294,7 @@ function cacheCard(c){
       set:(c.set||'').toUpperCase(), rarity:c.rarity||'', price:(c.prices&&c.prices.usd)||null,
       produced:c.produced_mana||[],
       text: oracleText(c),
+      ci: c.color_identity||[],
     };
   }
   return state.cards[c.id];
@@ -550,16 +551,18 @@ function renderSearch(){
   } else if(!state.searchResults.length){
     h += `<div class="empty"><div class="big">🤔</div><div class="t">No results</div><div class="tiny">Check spelling or try a broader query.</div></div>`;
   } else {
+    const allowedCI = adding ? commanderIdentity(adding) : null;
     state.searchResults.forEach(c=>{
       const owned = state.collection[c.id]||0;
       const inDeck = adding ? (adding.cards[c.id]||0) : 0;
-      h += `<div class="cardrow">
+      const off = allowedCI && !withinIdentity(c.color_identity||[], allowedCI);
+      h += `<div class="cardrow"${off?' style="opacity:.55"':''}>
         <div class="thumb" style="background-image:url('${(c.image_uris&&c.image_uris.small)||((c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small))||''}')" onclick="showCardObj(${esc(JSON.stringify(c.id))})"></div>
         <div class="info">
           <div class="nm">${esc(c.name)} ${pips(c.colors&&c.colors.length?c.colors:(c.color_identity||[]))}</div>
-          <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${inDeck?` · <span style="color:var(--accent2)">${inDeck} in deck</span>`:owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}</div>
+          <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${off?` · <span style="color:var(--danger)">off-color</span>`:inDeck?` · <span style="color:var(--accent2)">${inDeck} in deck</span>`:owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}</div>
         </div>
-        <button class="btn gold sm" onclick="${picking?`setCommander('${picking.id}','${c.id}')`:adding?`addToDeckDirect('${adding.id}','${c.id}')`:`addMenu('${c.id}')`}">${picking?'Set':adding?'＋':'Add'}</button>
+        <button class="btn ${off?'':'gold'} sm" onclick="${picking?`setCommander('${picking.id}','${c.id}')`:adding?`addToDeckDirect('${adding.id}','${c.id}')`:`addMenu('${c.id}')`}">${picking?'Set':adding?(off?'✕':'＋'):'Add'}</button>
       </div>`;
     });
   }
@@ -786,8 +789,9 @@ function gameMulligan(){
   g.library=shuffle(all); g.hand=[]; g.battlefield=[]; g.graveyard=[]; g.exile=[];
   g.turn=1; g.life=40; g.cmdTax=0; g.mulligans++; g.landsThisTurn=0; g.landLimit=1; g.phase=3; g.pool=emptyPool();
   g.command=g.commanderId?[{iid:uid(),cardId:g.commanderId}]:[];
-  for(let i=0;i<7;i++) gameDraw();
-  toast('Mulligan #'+g.mulligans); render();
+  const n=Math.max(0, 7 - g.mulligans);
+  for(let i=0;i<n;i++) gameDraw();
+  toast('Mulligan #'+g.mulligans+' · '+n+' cards'); render();
 }
 function gameMove(iid,from,to){
   const g=state.game, arr=g[from], idx=arr.findIndex(c=>c.iid===iid); if(idx<0) return;
@@ -960,9 +964,22 @@ function startAddingTo(deckId){
   state.searchQuery=''; state.searchResults=[];
   render(); setTimeout(()=>$('#searchInput')?.focus(),60);
 }
+function commanderIdentity(deck){
+  if(!deck || deck.format!=='Commander' || !deck.commander) return null; // null = no restriction
+  const cc=card(deck.commander);
+  return (cc && ((cc.ci&&cc.ci.length)?cc.ci:cc.colors)) || [];
+}
+function withinIdentity(ci, allowed){ return (ci||[]).every(c=>allowed.includes(c)); }
+function offColor(obj, cardId, deck){
+  const allowed=commanderIdentity(deck); if(!allowed) return false;
+  const ci=(obj&&obj.color_identity)||(card(cardId)&&card(cardId).ci)||[];
+  return !withinIdentity(ci, allowed);
+}
 function addToDeckDirect(deckId,cardId){
-  const c=state._resultMap&&state._resultMap[cardId]; if(c) cacheCard(c);
+  const c=state._resultMap&&state._resultMap[cardId];
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  if(offColor(c,cardId,d)){ toast('Outside '+(card(d.commander)?card(d.commander).name:'your commander')+'’s color identity'); return; }
+  if(c) cacheCard(c);
   d.cards[cardId]=(d.cards[cardId]||0)+1;
   DB.save(); toast('Added to '+d.name); renderSearch();
 }
@@ -1208,8 +1225,10 @@ function addToCollection(cardId){
   DB.save(); toast('Added to collection'); render();
 }
 function addToDeck(cardId, deckId){
-  const c = state._resultMap&&state._resultMap[cardId]; if(c) cacheCard(c);
+  const c = state._resultMap&&state._resultMap[cardId];
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  if(offColor(c,cardId,d)){ toast('Outside '+(card(d.commander)?card(d.commander).name:'your commander')+'’s color identity'); closeModal(); return; }
+  if(c) cacheCard(c);
   d.cards[cardId]=(d.cards[cardId]||0)+1;
   DB.save(); toast('Added to '+d.name); closeModal();
 }
