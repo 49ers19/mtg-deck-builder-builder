@@ -213,6 +213,11 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .gcard.noimg{display:flex;align-items:center;justify-content:center;padding:3px;background:var(--panel2)}
 .gcard-lbl{font-size:8px;line-height:1.1;font-weight:700;color:var(--text);text-align:center;overflow:hidden}
 .card-text{font-size:12px;line-height:1.5;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:14px;max-height:170px;overflow-y:auto;white-space:pre-wrap}
+.opp-panel{display:flex;align-items:center;justify-content:space-between;gap:10px;background:linear-gradient(135deg,#2a1d22,#1b1518);border:1px solid var(--danger);border-radius:14px;padding:11px 13px;margin-bottom:12px}
+.opp-l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+.opp-v{font-family:'Cinzel',serif;font-weight:700;font-size:30px;color:var(--danger);line-height:1.1}
+.opp-v.dead{color:var(--ok)}
+.opp-btns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .phase-bar{display:flex;gap:4px;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .ph{flex:1;text-align:center;font-size:10px;font-weight:700;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 3px;white-space:nowrap;text-transform:uppercase;letter-spacing:.2px}
 .ph.on{background:linear-gradient(180deg,var(--accent2),var(--accent));color:#23200a;border-color:var(--accent)}
@@ -706,7 +711,7 @@ function startGame(deckId){
   state.game={ deckId, deckName:d.name, commanderId:d.commander||null, turn:1, life:40,
     library:lib, hand:[], battlefield:[], graveyard:[], exile:[],
     command:d.commander?[{iid:uid(),cardId:d.commander}]:[], cmdTax:0, mulligans:0,
-    landsThisTurn:0, landLimit:1, phase:3, pool:emptyPool() };
+    landsThisTurn:0, landLimit:1, phase:3, pool:emptyPool(), oppLife:40 };
   for(let i=0;i<7;i++) gameDraw();
   render();
   enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[]));
@@ -735,8 +740,8 @@ function gameNextTurn(){ const g=state.game; g.turn++; g.phase=3; g.battlefield.
 function gameNextPhase(){
   const g=state.game; let p=(g.phase==null?3:g.phase)+1;
   if(p>=PHASES.length){ p=0; g.turn++; }
-  g.phase=p; g.pool=emptyPool(); // mana empties between phases
-  if(PHASES[p]==='Untap'){ g.battlefield.forEach(c=>c.tapped=false); g.landsThisTurn=0; toast('Turn '+g.turn+' · untap'); }
+  g.phase=p;
+  if(PHASES[p]==='Untap'){ g.battlefield.forEach(c=>c.tapped=false); g.landsThisTurn=0; g.pool=emptyPool(); toast('Turn '+g.turn+' · untap — mana refreshed'); }
   else if(PHASES[p]==='Draw'){ const d=gameDraw(); toast(d?'Draw step · drew a card':'Draw step · library empty!'); }
   else toast(PHASES[p]);
   render();
@@ -745,11 +750,16 @@ function gameNextPhase(){
 function addMana(color,n){ const g=state.game; g.pool[color]=(g.pool[color]||0)+(n||1); render(); }
 function clearPool(){ state.game.pool=emptyPool(); render(); }
 function tapForMana(iid){
+  const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c||c.tapped) return;
+  const cd=card(c.cardId);
+  let prod=(cd&&cd.produced&&cd.produced.length)?cd.produced.slice():((cd&&cd.colors&&cd.colors.length)?cd.colors.slice():['C']);
+  const uniq=[...new Set(prod.map(m=>MANA_COLORS.includes(m)?m:'C'))];
+  if(uniq.length<=1){ tapAddMana(iid, uniq[0]||'C'); return; }
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Tap for which mana?</h3><div class="addmenu">${uniq.map(m=>`<button class="btn full" onclick="tapAddMana('${iid}','${m}')">${m}</button>`).join('')}<button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div></div>`;
+}
+function tapAddMana(iid, color){
   const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c) return;
-  c.tapped=true;
-  const cd=card(c.cardId), prod=(cd&&cd.produced)||[];
-  if(prod.length) prod.forEach(m=>{ if(g.pool[m]!=null) g.pool[m]++; else g.pool.C++; });
-  else { const col=(cd&&cd.colors&&cd.colors[0])||'C'; g.pool[col]=(g.pool[col]||0)+1; }
+  c.tapped=true; g.pool[color]=(g.pool[color]||0)+1;
   closeModal(); render();
 }
 function parseCost(mc){
@@ -781,6 +791,8 @@ function castFromHand(iid, ignoreMana){
 function gameLandLimit(d){ const g=state.game; g.landLimit=Math.max(1,(g.landLimit||1)+d); render(); }
 function playExtraLand(iid){ state.game.landLimit=(state.game.landLimit||1)+1; gameMove(iid,'hand','battlefield'); }
 function gameLife(d){ state.game.life+=d; render(); }
+function oppDamage(d){ const g=state.game; g.oppLife=(g.oppLife||0)-d; if(g.oppLife<=0){ g.oppLife=0; toast('🏆 Opponent defeated — you win!'); } render(); }
+function oppSet(){ const v=window.prompt('Set opponent life (training dummy):','1000'); if(v===null) return; const n=parseInt(v,10); if(!isNaN(n)){ state.game.oppLife=n; render(); } }
 function gameShuffle(){ shuffle(state.game.library); toast('Library shuffled'); }
 function exitGame(){ if(confirm('Leave this game? Your saved deck is untouched — only this play session is discarded.')){ state.game=null; render(); } }
 function gameMulligan(){
@@ -880,7 +892,8 @@ function renderGame(){
       <button class="btn sm" onclick="gameMulligan()">↺ Mulligan</button>
       <div class="gcount">🌍 ${g.landsThisTurn||0}/${g.landLimit||1}<button class="iconbtn" onclick="gameLandLimit(-1)">−</button><button class="iconbtn" onclick="gameLandLimit(1)">＋</button></div>
     </div>
-    <div class="mana-bar">${MANA_COLORS.map(m=>`<button class="mana mana-${m}" onclick="addMana('${m}',1)">${m} <b>${(g.pool&&g.pool[m])||0}</b></button>`).join('')}<button class="mana mana-clr" onclick="clearPool()">✕</button></div>`;
+    <div class="mana-bar">${MANA_COLORS.map(m=>`<span class="mana mana-${m}">${m} <b>${(g.pool&&g.pool[m])||0}</b></span>`).join('')}<button class="mana mana-clr" onclick="clearPool()" title="Empty pool">✕</button></div>
+    <div class="opp-panel"><div><div class="opp-l">🎯 Training Opponent</div><div class="opp-v ${(g.oppLife||0)<=0?'dead':''}">${g.oppLife||0}</div></div><div class="opp-btns"><button class="btn sm" onclick="oppDamage(1)">−1</button><button class="btn sm" onclick="oppDamage(5)">−5</button><button class="btn sm" onclick="oppDamage(10)">−10</button><button class="btn sm" onclick="oppSet()">Set</button></div></div>`;
   if(g.command.length) h+=`<div class="zone"><div class="zone-h"><span>Command Zone${g.cmdTax?` · tax +${g.cmdTax}`:''}</span></div><div class="zone-cards">${zc(g.command,'command')}</div></div>`;
   h+=`<div class="zone bf"><div class="zone-h"><span>Battlefield (${g.battlefield.length})</span></div><div class="zone-cards">${zc(g.battlefield,'battlefield')}</div></div>`;
   h+=`<div class="zone"><div class="zone-h"><span>Hand (${g.hand.length})</span></div><div class="zone-cards">${zc(g.hand,'hand')}</div></div>`;
@@ -1511,7 +1524,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,castFromHand,gameUntapInfo,createToken,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,castFromHand,gameUntapInfo,createToken,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
