@@ -210,6 +210,9 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .gcard{width:48px;height:67px;border-radius:5px;background:var(--bg2) center/cover;border:1px solid var(--line);cursor:pointer;flex-shrink:0;transition:transform .08s}
 .gcard:active{transform:scale(1.05)}
 .gcard.tapped{opacity:.45;filter:grayscale(.6);transform:rotate(10deg)}
+.phase-bar{display:flex;gap:4px;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.ph{flex:1;text-align:center;font-size:10px;font-weight:700;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 3px;white-space:nowrap;text-transform:uppercase;letter-spacing:.2px}
+.ph.on{background:linear-gradient(180deg,var(--accent2),var(--accent));color:#23200a;border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -688,13 +691,23 @@ function startGame(deckId){
   state.game={ deckId, deckName:d.name, commanderId:d.commander||null, turn:1, life:40,
     library:lib, hand:[], battlefield:[], graveyard:[], exile:[],
     command:d.commander?[{iid:uid(),cardId:d.commander}]:[], cmdTax:0, mulligans:0,
-    landsThisTurn:0, landLimit:1 };
+    landsThisTurn:0, landLimit:1, phase:3 };
   for(let i=0;i<7;i++) gameDraw();
   render();
 }
 function gameDraw(){ const g=state.game; if(g.library.length){ g.hand.push(g.library.shift()); return true; } return false; }
 function gameDrawBtn(){ if(!gameDraw()) toast('Library is empty!'); render(); }
-function gameNextTurn(){ const g=state.game; g.turn++; g.battlefield.forEach(c=>c.tapped=false); g.landsThisTurn=0; const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
+const PHASES=['Untap','Upkeep','Draw','Main 1','Combat','Main 2','End'];
+function gameNextTurn(){ const g=state.game; g.turn++; g.phase=3; g.battlefield.forEach(c=>c.tapped=false); g.landsThisTurn=0; const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
+function gameNextPhase(){
+  const g=state.game; let p=(g.phase==null?3:g.phase)+1;
+  if(p>=PHASES.length){ p=0; g.turn++; }
+  g.phase=p;
+  if(PHASES[p]==='Untap'){ g.battlefield.forEach(c=>c.tapped=false); g.landsThisTurn=0; toast('Turn '+g.turn+' · untap'); }
+  else if(PHASES[p]==='Draw'){ const d=gameDraw(); toast(d?'Draw step · drew a card':'Draw step · library empty!'); }
+  else toast(PHASES[p]);
+  render();
+}
 function gameLandLimit(d){ const g=state.game; g.landLimit=Math.max(1,(g.landLimit||1)+d); render(); }
 function playExtraLand(iid){ state.game.landLimit=(state.game.landLimit||1)+1; gameMove(iid,'hand','battlefield'); }
 function gameLife(d){ state.game.life+=d; render(); }
@@ -704,7 +717,7 @@ function gameMulligan(){
   const g=state.game;
   const all=[...g.library,...g.hand,...g.battlefield,...g.graveyard,...g.exile].map(c=>({iid:c.iid,cardId:c.cardId}));
   g.library=shuffle(all); g.hand=[]; g.battlefield=[]; g.graveyard=[]; g.exile=[];
-  g.turn=1; g.life=40; g.cmdTax=0; g.mulligans++; g.landsThisTurn=0; g.landLimit=1;
+  g.turn=1; g.life=40; g.cmdTax=0; g.mulligans++; g.landsThisTurn=0; g.landLimit=1; g.phase=3;
   g.command=g.commanderId?[{iid:uid(),cardId:g.commanderId}]:[];
   for(let i=0;i<7;i++) gameDraw();
   toast('Mulligan #'+g.mulligans); render();
@@ -755,9 +768,11 @@ function renderGame(){
       <div class="ttl">${esc(g.deckName)}</div>
       <span class="turn-badge">Turn ${g.turn}</span>
     </div>
+    <div class="phase-bar">${PHASES.map((ph,i)=>`<span class="ph ${i===(g.phase==null?3:g.phase)?'on':''}">${ph}</span>`).join('')}</div>
     <div class="game-bar">
       <div class="gcount">❤ <button class="iconbtn" onclick="gameLife(-1)">−</button><b style="min-width:28px;text-align:center">${g.life}</b><button class="iconbtn" onclick="gameLife(1)">＋</button></div>
-      <button class="btn gold sm" onclick="gameNextTurn()">▶ Next turn</button>
+      <button class="btn gold sm" onclick="gameNextPhase()">▶ Next phase</button>
+      <button class="btn sm" onclick="gameNextTurn()">⏭ Next turn</button>
       <button class="btn sm" onclick="gameMulligan()">↺ Mulligan</button>
       <div class="gcount">🌍 ${g.landsThisTurn||0}/${g.landLimit||1}<button class="iconbtn" onclick="gameLandLimit(-1)">−</button><button class="iconbtn" onclick="gameLandLimit(1)">＋</button></div>
     </div>`;
@@ -1376,7 +1391,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
