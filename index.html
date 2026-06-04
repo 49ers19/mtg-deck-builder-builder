@@ -214,7 +214,9 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .gcard-lbl{font-size:8px;line-height:1.1;font-weight:700;color:var(--text);text-align:center;overflow:hidden}
 .card-text{font-size:12px;line-height:1.5;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:14px;max-height:170px;overflow-y:auto;white-space:pre-wrap}
 .abil{display:flex;align-items:flex-start;gap:8px;text-align:left;white-space:normal;font-weight:500;font-size:12px;line-height:1.45;padding:10px 12px;margin-bottom:7px}
-.abil-tag{flex:0 0 auto;font-size:9px;font-weight:800;color:var(--accent2);background:rgba(201,162,39,.15);border-radius:4px;padding:2px 5px;margin-top:1px}
+.abil-tag{flex:0 0 auto;font-size:9px;font-weight:800;color:var(--muted);background:rgba(139,147,184,.15);border-radius:4px;padding:2px 5px;margin-top:1px;white-space:nowrap}
+.tag-use{color:#23200a;background:var(--accent2)}
+.abil-info{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.45;padding:10px 12px;margin-bottom:7px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;color:var(--muted)}
 .opp-panel{display:flex;align-items:center;justify-content:space-between;gap:10px;background:linear-gradient(135deg,#2a1d22,#1b1518);border:1px solid var(--danger);border-radius:14px;padding:11px 13px;margin-bottom:12px}
 .opp-l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
 .opp-v{font-family:'Cinzel',serif;font-weight:700;font-size:30px;color:var(--danger);line-height:1.1}
@@ -303,6 +305,7 @@ function cacheCard(c){
       text: oracleText(c),
       ci: c.color_identity||[],
       power: (c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null,
+      legal: c.legalities||{},
     };
   }
   return state.cards[c.id];
@@ -568,7 +571,7 @@ function renderSearch(){
         <div class="thumb" style="background-image:url('${(c.image_uris&&c.image_uris.small)||((c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small))||''}')" onclick="showCardObj(${esc(JSON.stringify(c.id))})"></div>
         <div class="info">
           <div class="nm">${esc(c.name)} ${pips(c.colors&&c.colors.length?c.colors:(c.color_identity||[]))}</div>
-          <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${off?` · <span style="color:var(--danger)">off-color</span>`:inDeck?` · <span style="color:var(--accent2)">${inDeck} in deck</span>`:owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}</div>
+          <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${off?` · <span style="color:var(--danger)">off-color</span>`:inDeck?` · <span style="color:var(--accent2)">${inDeck} in deck</span>`:owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}${bannedBadge(c)}</div>
         </div>
         <button class="btn ${off?'':'gold'} sm" onclick="${picking?`setCommander('${picking.id}','${c.id}')`:adding?`addToDeckDirect('${adding.id}','${c.id}')`:`addMenu('${c.id}')`}">${picking?'Set':adding?(off?'✕':'＋'):'Add'}</button>
       </div>`;
@@ -720,19 +723,35 @@ function startGame(deckId){
   enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[]));
 }
 async function enrichGameCards(ids){
-  const missing=[...new Set(ids)].filter(id=>state.cards[id] && (state.cards[id].text===undefined || state.cards[id].power===undefined));
+  const missing=[...new Set(ids)].filter(id=>state.cards[id] && (state.cards[id].text===undefined || state.cards[id].power===undefined || state.cards[id].legal===undefined));
   if(!missing.length) return;
   for(let i=0;i<missing.length;i+=75){
     const chunk=missing.slice(i,i+75);
     try{
       const r=await fetch('https://api.scryfall.com/cards/collection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifiers:chunk.map(id=>({id}))})});
       const d=await r.json();
-      (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); e.power=(c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null; } });
+      (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); e.power=(c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null; e.legal=c.legalities||e.legal||{}; } });
     }catch(e){}
   }
   DB.save(); if(state.game) render();
 }
 function hasUntapEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /untap/i.test(cd.text||''); }); }
+function hasReturnEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /(return[^.]{0,80}hand|to (its|their) owner'?s hand|to your hand|to (its|their) hand)/i.test(cd.text||''); }); }
+function classifyAbility(ab){
+  if(/^(When|Whenever|At )/i.test(ab)) return 'triggered';
+  const ci=ab.indexOf(':');
+  if(ci>0 && ci<40) return 'activated';
+  return 'static';
+}
+function bannedBadge(obj){
+  const L=obj&&(obj.legalities||obj.legal); if(!L) return '';
+  const out=[];
+  [['commander','Commander'],['modern','Modern'],['legacy','Legacy'],['vintage','Vintage'],['pioneer','Pioneer'],['standard','Standard'],['pauper','Pauper']].forEach(([k,lab])=>{
+    if(L[k]==='banned') out.push('⛔ '+lab);
+    else if(L[k]==='restricted') out.push('① '+lab+' (restricted)');
+  });
+  return out.length ? `<span style="color:var(--danger)"> · ${out.join(', ')}</span>` : '';
+}
 function gameUntapInfo(){ toast('Stays tapped until your untap step — play a card with an untap ability to untap it sooner'); }
 function gameDraw(){ const g=state.game; if(g.library.length){ g.hand.push(g.library.shift()); return true; } return false; }
 function gameDrawBtn(){ if(!gameDraw()) toast('Library is empty!'); render(); }
@@ -876,20 +895,27 @@ function gameCardMenu(iid,zone){
     if(!c.tapped) acts.push(['⟳ Tap',`gameTap('${iid}')`]);
     else if(hasUntapEnabler()) acts.push(['↺ Untap (you control an untap ability)',`gameTap('${iid}')`]);
     else acts.push(['🔒 Stays tapped — no untap card in play',`gameUntapInfo()`]);
-    acts.push(['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`],['↩ Return to hand',`gameMove('${iid}','battlefield','hand')`],['✦ Exile',`gameMove('${iid}','battlefield','exile')`]);
+    acts.push(['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`]);
+    if(hasReturnEnabler()) acts.push(['↩ Return to hand (you control a return ability)',`gameMove('${iid}','battlefield','hand')`]);
+    acts.push(['✦ Exile',`gameMove('${iid}','battlefield','exile')`]);
     if(c.cardId===g.commanderId) acts.push(['👑 To command zone',`gameMove('${iid}','battlefield','command')`]);
   }
-  else if(zone==='graveyard') acts=[['↩ Return to hand',`gameMove('${iid}','graveyard','hand')`],['▶ To battlefield',`gameMove('${iid}','graveyard','battlefield')`],['↥ Top of library',`gameMove('${iid}','graveyard','libraryTop')`],['✦ Exile',`gameMove('${iid}','graveyard','exile')`]];
-  else if(zone==='exile') acts=[['↩ Return to hand',`gameMove('${iid}','exile','hand')`],['▶ To battlefield',`gameMove('${iid}','exile','battlefield')`]];
+  else if(zone==='graveyard'){ acts=[]; if(hasReturnEnabler()) acts.push(['↩ Return to hand',`gameMove('${iid}','graveyard','hand')`]); acts.push(['▶ To battlefield',`gameMove('${iid}','graveyard','battlefield')`],['↥ Top of library',`gameMove('${iid}','graveyard','libraryTop')`],['✦ Exile',`gameMove('${iid}','graveyard','exile')`]); }
+  else if(zone==='exile'){ acts=[]; if(hasReturnEnabler()) acts.push(['↩ Return to hand',`gameMove('${iid}','exile','hand')`]); acts.push(['▶ To battlefield',`gameMove('${iid}','exile','battlefield')`]); }
   else if(zone==='command'){ const tax=g.cmdTax||0; acts=[['👑 Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):'')+(tax?' +{'+tax+'}':''),`castCommander('${iid}',false)`]]; }
   const abLines=(cd&&cd.text)?cd.text.split('\n').map(s=>s.trim()).filter(Boolean):[];
   const abilitiesHTML = abLines.length
-    ? `<div class="section-title" style="margin:2px 2px 6px">Abilities — tap one to use</div>`+abLines.map((ab,i)=>{ const trig=/^(When|Whenever|At )/i.test(ab); return `<button class="btn full abil" onclick="useAbility('${iid}','${zone}',${i})"><span class="abil-tag">${trig?'TRIGGER':'USE'}</span><span>${esc(ab)}</span></button>`; }).join('')
+    ? `<div class="section-title" style="margin:2px 2px 6px">Abilities <span class="tiny muted" style="text-transform:none;letter-spacing:0">· activated = manual, triggered/passive = auto</span></div>`+abLines.map((ab,i)=>{
+        const cls=classifyAbility(ab);
+        if(cls==='activated' && zone==='battlefield') return `<button class="btn full abil" onclick="useAbility('${iid}','${zone}',${i})"><span class="abil-tag tag-use">USE</span><span>${esc(ab)}</span></button>`;
+        const tag=cls==='triggered'?'AUTO · TRIGGER':cls==='static'?'AUTO · PASSIVE':(zone==='hand'?'ACTIVATED · not from hand':'ACTIVATED');
+        return `<div class="abil-info"><span class="abil-tag">${tag}</span><span>${esc(ab)}</span></div>`;
+      }).join('')
     : '';
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
     <h3>${cd?esc(cd.name):'Card'}</h3>
     ${img?`<img src="${img}" style="width:150px;border-radius:11px;display:block;margin:0 auto 12px">`:''}
-    ${cd&&cd.type_line?`<div class="tiny muted" style="text-align:center;margin-bottom:8px">${esc(cd.type_line)}${cd.mana_cost?' · '+manaText(cd.mana_cost):''}</div>`:''}
+    ${cd&&cd.type_line?`<div class="tiny muted" style="text-align:center;margin-bottom:8px">${esc(cd.type_line)}${cd.mana_cost?' · '+manaText(cd.mana_cost):''}${bannedBadge(cd)}</div>`:''}
     ${abilitiesHTML}
     <div class="addmenu">${acts.map(a=>`<button class="btn full" onclick="${a[1]}">${a[0]}</button>`).join('')}
     <button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div></div>`;
