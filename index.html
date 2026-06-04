@@ -734,7 +734,7 @@ function hasUntapEnabler(){ return state.game.battlefield.some(c=>{ const cd=car
 function gameUntapInfo(){ toast('Stays tapped until your untap step — play a card with an untap ability to untap it sooner'); }
 function gameDraw(){ const g=state.game; if(g.library.length){ g.hand.push(g.library.shift()); return true; } return false; }
 function gameDrawBtn(){ if(!gameDraw()) toast('Library is empty!'); render(); }
-const PHASES=['Untap','Upkeep','Draw','Main 1','Combat','Main 2','End'];
+const PHASES=['Untap','Upkeep','Draw','Main 1','Combat','End'];
 const MANA_COLORS=['W','U','B','R','G','C'];
 function emptyPool(){ return {W:0,U:0,B:0,R:0,G:0,C:0}; }
 function gameNextTurn(){ const g=state.game; g.turn++; g.phase=3; g.battlefield.forEach(c=>c.tapped=false); g.landsThisTurn=0; g.pool=emptyPool(); const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
