@@ -300,6 +300,7 @@ const state = {
   session: null,
   collFilter: { q:'', type:'', color:'', cmc:'', rarity:'' },
   analyzeDeckId: null,
+  analyzeRecs: {},
 };
 
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -655,8 +656,38 @@ function renderCollection(){
 }
 
 // ---------- ANALYZE ----------
-function selectAnalyzeDeck(id){ state.analyzeDeckId=id; render(); }
+function selectAnalyzeDeck(id){ state.analyzeDeckId=id; render(); const d=state.decks.find(x=>x.id===id); if(d && !state.analyzeRecs[id]) fetchRecs(d); }
 function closeAnalyze(){ state.analyzeDeckId=null; render(); }
+function slugify(name){ return name.toLowerCase().normalize('NFD').replace(/[^a-z0-9 ]/g,'').trim().replace(/\s+/g,'-'); }
+async function scryfallFallbackRecs(cmd, have){
+  const ci=(cmd.ci&&cmd.ci.length?cmd.ci:cmd.colors)||[];
+  const q='legal:commander '+(ci.length?'id<='+ci.join(''):'id:c')+' -t:land -is:commander';
+  try{ const r=await fetch('https://api.scryfall.com/cards/search?order=edhrec&q='+encodeURIComponent(q)); if(r.ok){ const d=await r.json(); return (d.data||[]).map(c=>c.name).filter(n=>!have.has(n.toLowerCase())).slice(0,40); } }catch(e){}
+  return [];
+}
+async function fetchRecs(deck){
+  const cmd=deck.commander&&card(deck.commander);
+  if(!(deck.format==='Commander' && cmd)){ state.analyzeRecs[deck.id]={status:'na'}; if(state.analyzeDeckId===deck.id) renderAnalyze(); return; }
+  state.analyzeRecs[deck.id]={status:'loading'}; if(state.analyzeDeckId===deck.id) renderAnalyze();
+  const have=new Set([cmd.name.toLowerCase()]);
+  for(const id in deck.cards){ const c=card(id); if(c) have.add(c.name.toLowerCase()); }
+  let names=[];
+  try{
+    const r=await fetch('https://json.edhrec.com/pages/commanders/'+slugify(cmd.name)+'.json');
+    if(r.ok){ const d=await r.json(); const cls=((d.container&&d.container.json_dict&&d.container.json_dict.cardlists)||d.cardlists||[]).slice();
+      const pri=hd=>{ hd=(hd||'').toLowerCase(); if(hd.includes('top cards')) return 0; if(hd.includes('high synergy')||hd.includes('signature')) return 1; if(hd.includes('new')) return 9; return 5; };
+      cls.sort((a,b)=>pri(a.header)-pri(b.header));
+      cls.forEach(cl=>{ (cl.cardviews||cl.cardlist||[]).forEach(cv=>{ if(cv&&cv.name) names.push(cv.name); }); }); }
+  }catch(e){}
+  const seen=new Set();
+  names=names.filter(n=>{ const k=n.toLowerCase(); if(seen.has(k)||have.has(k)) return false; seen.add(k); return true; });
+  if(!names.length) names=await scryfallFallbackRecs(cmd, have);
+  const {found}=await scryCollection(names.slice(0,45));
+  const byNorm={}; found.forEach(c=>{ byNorm[c.name.toLowerCase()]=c; });
+  const cards=names.map(n=>byNorm[n.toLowerCase()]).filter(Boolean).slice(0,24);
+  state.analyzeRecs[deck.id]={status:'ok', cards};
+  if(state.analyzeDeckId===deck.id) renderAnalyze();
+}
 function renderAnalyze(){
   const decks=state.decks;
   if(!state.analyzeDeckId || !decks.find(d=>d.id===state.analyzeDeckId)){
@@ -666,6 +697,7 @@ function renderAnalyze(){
     main.innerHTML=h; return;
   }
   const d=decks.find(x=>x.id===state.analyzeDeckId);
+  const cmd=d.commander&&card(d.commander);
   const n=deckCardCount(d); const {counts,total}=deckColorCounts(d);
   const buckets=[0,0,0,0,0,0,0,0]; let lands=0, avgNum=0, avgDen=0;
   for(const id in d.cards){ const c=card(id); if(!c) continue; const q=d.cards[id]; if(/\bLand\b/.test(c.type_line||'')){ lands+=q; continue; } const b=Math.min(7,Math.floor(c.cmc||0)); buckets[b]+=q; avgNum+=(c.cmc||0)*q; avgDen+=q; }
@@ -685,7 +717,19 @@ function renderAnalyze(){
   if(total){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Colors</div><div class="row" style="flex-wrap:wrap;gap:10px">`; Object.keys(counts).filter(k=>counts[k]).forEach(k=>{ h+=`<div class="row" style="gap:5px">${pips([k])}<span class="tiny muted">${COLOR_NAMES[k]} ${counts[k]}</span></div>`; }); h+=`</div></div>`; }
   if(avgDen){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Mana Curve (nonland)</div><div class="curve">`; buckets.forEach((cnt,i)=>{ h+=`<div class="bar"><span class="cnt">${cnt||''}</span><div class="fill" style="height:${cnt/maxB*100}%"></div><span class="lbl">${i===7?'7+':i}</span></div>`; }); h+=`</div></div>`; }
   h+=`<div class="panel"><div class="section-title" style="margin-top:0">Deck Health</div>${notes.map(x=>`<div class="tiny" style="margin-bottom:5px">${x}</div>`).join('')}</div>`;
-  h+=`<div class="panel" style="opacity:.75"><div class="section-title" style="margin-top:0">Card Recommendations</div><div class="tiny muted">Coming soon — suggested cards for your commander (planned via EDHREC). Free, no account needed.</div></div>`;
+  // recommendations
+  const rec=state.analyzeRecs[d.id];
+  h+=`<div class="panel"><div class="section-title" style="margin-top:0">Recommended Cards</div>`;
+  if(!rec || rec.status==='loading') h+=`<div class="tiny muted"><span class="mini-spin"></span> Finding cards for ${cmd?esc(cmd.name):'this deck'}…</div>`;
+  else if(rec.status==='na') h+=`<div class="tiny muted">Set a commander on this deck to get recommendations.</div>`;
+  else if(!rec.cards||!rec.cards.length) h+=`<div class="tiny muted">No recommendations found.</div>`;
+  else {
+    state._resultMap=state._resultMap||{}; rec.cards.forEach(c=>state._resultMap[c.id]=c);
+    h+=`<div class="tiny muted" style="margin-bottom:8px">Popular cards for ${esc(cmd.name)} (via EDHREC). Tap ＋ to add to the deck.</div>`;
+    rec.cards.forEach(c=>{ const inDeck=d.cards[c.id]||0; const thumb=(c.image_uris&&c.image_uris.small)||((c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small))||'';
+      h+=`<div class="cardrow"><div class="thumb" style="background-image:url('${thumb}')" onclick="showCardObj(${esc(JSON.stringify(c.id))})"></div><div class="info"><div class="nm">${esc(c.name)}</div><div class="meta">${esc(shortType(c.type_line))}${inDeck?' · <span style="color:var(--accent2)">in deck</span>':''}</div></div><button class="btn gold sm" onclick="addToDeckDirect('${d.id}','${c.id}')">＋</button></div>`; });
+  }
+  h+=`</div>`;
   main.innerHTML=h;
 }
 
@@ -1193,7 +1237,7 @@ function addToDeckDirect(deckId,cardId){
   if(c) cacheCard(c);
   d.cards[cardId]=(d.cards[cardId]||0)+1;
   syncCollectionToDeck(d,cardId);
-  DB.save(); toast('Added to '+d.name); renderSearch();
+  DB.save(); toast('Added to '+d.name); render();
 }
 function finishAdding(){ state.addToDeckId=null; state.tab='decks'; render(); }
 
