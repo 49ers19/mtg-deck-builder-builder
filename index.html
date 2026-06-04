@@ -810,7 +810,17 @@ function gameMove(iid,from,to){
   closeModal(); render();
 }
 function gameTap(iid){ const c=state.game.battlefield.find(x=>x.iid===iid); if(c){ c.tapped=!c.tapped; toast(c.tapped?'Tapped':'Untapped (ability)'); } closeModal(); render(); }
-function castCommander(iid){ state.game.cmdTax+=2; gameMove(iid,'command','battlefield'); }
+function castCommander(iid, ignoreMana){
+  const g=state.game, c=g.command.find(x=>x.iid===iid); if(!c) return;
+  const cd=card(c.cardId);
+  if(!ignoreMana){
+    const need=parseCost(cd&&cd.mana_cost); need.generic+=(g.cmdTax||0);
+    if(!canPay(need)){ toast('Not enough mana for commander — '+manaText(cd&&cd.mana_cost||'')+(g.cmdTax?' +{'+g.cmdTax+'} tax':'')); closeModal(); return; }
+    payCost(need);
+  }
+  g.cmdTax=(g.cmdTax||0)+2;
+  gameMove(iid,'command','battlefield');
+}
 function gameCardMenu(iid,zone){
   const g=state.game, c=g[zone].find(x=>x.iid===iid); if(!c) return;
   const cd=card(c.cardId), img=cd?(cd.img||cd.thumb):'';
@@ -833,7 +843,7 @@ function gameCardMenu(iid,zone){
   }
   else if(zone==='graveyard') acts=[['↩ Return to hand',`gameMove('${iid}','graveyard','hand')`],['▶ To battlefield',`gameMove('${iid}','graveyard','battlefield')`],['↥ Top of library',`gameMove('${iid}','graveyard','libraryTop')`],['✦ Exile',`gameMove('${iid}','graveyard','exile')`]];
   else if(zone==='exile') acts=[['↩ Return to hand',`gameMove('${iid}','exile','hand')`],['▶ To battlefield',`gameMove('${iid}','exile','battlefield')`]];
-  else if(zone==='command') acts=[['👑 Cast (to battlefield)',`castCommander('${iid}')`]];
+  else if(zone==='command'){ const tax=g.cmdTax||0; acts=[['👑 Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):'')+(tax?' +{'+tax+'}':''),`castCommander('${iid}',false)`],['👑 Cast (ignore mana)',`castCommander('${iid}',true)`]]; }
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
     <h3>${cd?esc(cd.name):'Card'}</h3>
     ${img?`<img src="${img}" style="width:150px;border-radius:11px;display:block;margin:0 auto 12px">`:''}
