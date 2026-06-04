@@ -656,7 +656,7 @@ function renderCollection(){
 }
 
 // ---------- ANALYZE ----------
-function selectAnalyzeDeck(id){ state.analyzeDeckId=id; render(); const d=state.decks.find(x=>x.id===id); if(d && !state.analyzeRecs[id]) fetchRecs(d); }
+function selectAnalyzeDeck(id){ state.analyzeDeckId=id; render(); const d=state.decks.find(x=>x.id===id); if(d){ enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[])); if(!state.analyzeRecs[id]) fetchRecs(d); } }
 function closeAnalyze(){ state.analyzeDeckId=null; render(); }
 function slugify(name){ return name.toLowerCase().normalize('NFD').replace(/[^a-z0-9 ]/g,'').trim().replace(/\s+/g,'-'); }
 async function scryfallFallbackRecs(cmd, have){
@@ -710,6 +710,17 @@ function renderAnalyze(){
   else if(lands > (isCmd?42:28)) notes.push('ℹ️ High land count ('+lands+').');
   if(avgDen && +avg>3.8) notes.push('ℹ️ High average mana value ('+avg+') — the deck may play slowly.');
   if(!notes.length) notes.push('✓ Land count and curve look reasonable.');
+  // function categories → strengths / weaknesses
+  const catCount={ramp:0,draw:0,removal:0,wipe:0,counter:0};
+  for(const id in d.cards){ const c=card(id); if(!c) continue; cardCategories(c).forEach(cat=>{ if(catCount[cat]!=null) catCount[cat]+=d.cards[id]; }); }
+  const targets={ramp:[8,'Ramp / acceleration'], draw:[8,'Card draw'], removal:[6,'Targeted removal'], wipe:[2,'Board wipes']};
+  const strengths=[], weaknesses=[], weakKeys=[];
+  Object.keys(targets).forEach(k=>{ const need=targets[k][0], label=targets[k][1], v=catCount[k]; if(v>=need) strengths.push(label+' ('+v+')'); else { weaknesses.push(label+' — only '+v+' (aim ~'+need+')'); weakKeys.push(k); } });
+  if(catCount.counter>=4) strengths.push('Counterspells ('+catCount.counter+')');
+  if(lands>=(isCmd?34:22) && lands<=(isCmd?42:28)) strengths.push('Solid mana base ('+lands+' lands)');
+  else if(lands<(isCmd?34:22)) weaknesses.push('Mana base — '+lands+' lands (aim '+(isCmd?'36–38':'~24')+')');
+  if(avgDen && +avg<=3.2) strengths.push('Low, efficient curve (avg MV '+avg+')');
+  else if(avgDen && +avg>3.8) weaknesses.push('High curve (avg MV '+avg+') — may be slow');
 
   let h=`<div class="detail-head"><button class="back" onclick="closeAnalyze()">‹</button><div class="ttl">${esc(d.name)}</div></div>
     <div class="statgrid"><div class="stat"><div class="v">${n}</div><div class="l">Cards</div></div><div class="stat"><div class="v">${lands}</div><div class="l">Lands</div></div><div class="stat"><div class="v">${avg}</div><div class="l">Avg MV</div></div></div>`;
@@ -717,17 +728,22 @@ function renderAnalyze(){
   if(total){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Colors</div><div class="row" style="flex-wrap:wrap;gap:10px">`; Object.keys(counts).filter(k=>counts[k]).forEach(k=>{ h+=`<div class="row" style="gap:5px">${pips([k])}<span class="tiny muted">${COLOR_NAMES[k]} ${counts[k]}</span></div>`; }); h+=`</div></div>`; }
   if(avgDen){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Mana Curve (nonland)</div><div class="curve">`; buckets.forEach((cnt,i)=>{ h+=`<div class="bar"><span class="cnt">${cnt||''}</span><div class="fill" style="height:${cnt/maxB*100}%"></div><span class="lbl">${i===7?'7+':i}</span></div>`; }); h+=`</div></div>`; }
   h+=`<div class="panel"><div class="section-title" style="margin-top:0">Deck Health</div>${notes.map(x=>`<div class="tiny" style="margin-bottom:5px">${x}</div>`).join('')}</div>`;
-  // recommendations
+  h+=`<div class="panel"><div class="section-title" style="margin-top:0">💪 Biggest Strengths</div>${strengths.length?strengths.map(s=>`<div class="tiny" style="margin-bottom:5px;color:var(--ok)">✓ ${esc(s)}</div>`).join(''):'<div class="tiny muted">Add more cards to surface strengths.</div>'}</div>`;
+  h+=`<div class="panel"><div class="section-title" style="margin-top:0">⚠️ Biggest Weaknesses</div>${weaknesses.length?weaknesses.map(s=>`<div class="tiny" style="margin-bottom:5px;color:var(--danger)">• ${esc(s)}</div>`).join(''):'<div class="tiny" style="color:var(--ok)">✓ No major gaps detected.</div>'}</div>`;
+  // what to add
   const rec=state.analyzeRecs[d.id];
-  h+=`<div class="panel"><div class="section-title" style="margin-top:0">Recommended Cards</div>`;
+  h+=`<div class="panel"><div class="section-title" style="margin-top:0">What to Add</div>`;
   if(!rec || rec.status==='loading') h+=`<div class="tiny muted"><span class="mini-spin"></span> Finding cards for ${cmd?esc(cmd.name):'this deck'}…</div>`;
   else if(rec.status==='na') h+=`<div class="tiny muted">Set a commander on this deck to get recommendations.</div>`;
   else if(!rec.cards||!rec.cards.length) h+=`<div class="tiny muted">No recommendations found.</div>`;
   else {
     state._resultMap=state._resultMap||{}; rec.cards.forEach(c=>state._resultMap[c.id]=c);
-    h+=`<div class="tiny muted" style="margin-bottom:8px">Popular cards for ${esc(cmd.name)} (via EDHREC). Tap ＋ to add to the deck.</div>`;
-    rec.cards.forEach(c=>{ const inDeck=d.cards[c.id]||0; const thumb=(c.image_uris&&c.image_uris.small)||((c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small))||'';
-      h+=`<div class="cardrow"><div class="thumb" style="background-image:url('${thumb}')" onclick="showCardObj(${esc(JSON.stringify(c.id))})"></div><div class="info"><div class="nm">${esc(c.name)}</div><div class="meta">${esc(shortType(c.type_line))}${inDeck?' · <span style="color:var(--accent2)">in deck</span>':''}</div></div><button class="btn gold sm" onclick="addToDeckDirect('${d.id}','${c.id}')">＋</button></div>`; });
+    const withCats=rec.cards.map(c=>({c, fills:cardCategories(c).filter(x=>weakKeys.includes(x))}));
+    withCats.sort((a,b)=>(b.fills.length>0)-(a.fills.length>0));
+    h+=`<div class="tiny muted" style="margin-bottom:8px">Popular cards for ${esc(cmd.name)} (via EDHREC) — ones that fix a weakness are first. Tap ＋ to add.</div>`;
+    withCats.forEach(({c,fills})=>{ const inDeck=d.cards[c.id]||0; const thumb=(c.image_uris&&c.image_uris.small)||((c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small))||'';
+      const tag = inDeck ? ' · <span style="color:var(--accent2)">in deck</span>' : (fills.length?` · <span style="color:var(--accent2)">fixes ${fills.join('/')}</span>`:'');
+      h+=`<div class="cardrow"><div class="thumb" style="background-image:url('${thumb}')" onclick="showCardObj(${esc(JSON.stringify(c.id))})"></div><div class="info"><div class="nm">${esc(c.name)}</div><div class="meta">${esc(shortType(c.type_line))}${tag}</div></div><button class="btn gold sm" onclick="addToDeckDirect('${d.id}','${c.id}')">＋</button></div>`; });
   }
   h+=`</div>`;
   main.innerHTML=h;
@@ -860,7 +876,19 @@ async function enrichGameCards(ids){
       (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); e.power=(c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null; e.legal=c.legalities||e.legal||{}; } });
     }catch(e){}
   }
-  DB.save(); if(state.game) render();
+  DB.save(); render();
+}
+function cardCategories(c){
+  const t=((c.text!=null?c.text:c.oracle_text)||'').toLowerCase();
+  const tl=(c.type_line||'').toLowerCase();
+  const cats=[];
+  if(/\bland\b/.test(tl)){ cats.push('land'); return cats; }
+  if(/\{t\}: add|add \{|search your library for [^.]*\bland|create (a|one|two|three|x)[^.]{0,18}treasure/.test(t)) cats.push('ramp');
+  if(/draw [^.]{0,18}card/.test(t)) cats.push('draw');
+  if(/counter target (spell|ability)/.test(t)) cats.push('counter');
+  if(/(destroy|exile) all |all creatures get -|deals? \d+ damage to each|sacrifices? (a|all|that many)/.test(t)) cats.push('wipe');
+  else if(/(destroy|exile) target (creature|permanent|artifact|enchantment|planeswalker|nonland)|deals? \d+ damage to (any target|target creature|target planeswalker)|fight target/.test(t)) cats.push('removal');
+  return cats;
 }
 function hasUntapEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /untap/i.test(cd.text||''); }); }
 function hasReturnEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /(return[^.]{0,80}hand|to (its|their) owner'?s hand|to your hand|to (its|their) hand)/i.test(cd.text||''); }); }
