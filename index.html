@@ -784,7 +784,7 @@ function gameMove(iid,from,to){
   else { delete c.tapped; g[to].push(c); }
   closeModal(); render();
 }
-function gameTap(iid){ const c=state.game.battlefield.find(x=>x.iid===iid); if(c) c.tapped=!c.tapped; closeModal(); render(); }
+function gameTap(iid){ const c=state.game.battlefield.find(x=>x.iid===iid); if(c){ c.tapped=!c.tapped; toast(c.tapped?'Tapped':'Untapped (ability)'); } closeModal(); render(); }
 function castCommander(iid){ state.game.cmdTax+=2; gameMove(iid,'command','battlefield'); }
 function gameCardMenu(iid,zone){
   const g=state.game, c=g[zone].find(x=>x.iid===iid); if(!c) return;
@@ -797,7 +797,7 @@ function gameCardMenu(iid,zone){
     else acts=[['▶ Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):''),`castFromHand('${iid}',false)`],['▶ Play (ignore mana)',`castFromHand('${iid}',true)`]];
     acts.push(['⚰ Discard',`gameMove('${iid}','hand','graveyard')`],['✦ Exile',`gameMove('${iid}','hand','exile')`],['↧ Bottom of library',`gameMove('${iid}','hand','libraryBottom')`]);
   }
-  else if(zone==='battlefield'){ acts=[]; if(canTapMana&&!c.tapped) acts.push(['🔵 Tap for mana',`tapForMana('${iid}')`]); acts.push([c.tapped?'↺ Untap':'⟳ Tap',`gameTap('${iid}')`],['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`],['↩ Return to hand',`gameMove('${iid}','battlefield','hand')`],['✦ Exile',`gameMove('${iid}','battlefield','exile')`]); if(c.cardId===g.commanderId) acts.push(['👑 To command zone',`gameMove('${iid}','battlefield','command')`]); }
+  else if(zone==='battlefield'){ acts=[]; if(canTapMana&&!c.tapped) acts.push(['🔵 Tap for mana',`tapForMana('${iid}')`]); acts.push(c.tapped?['↺ Untap (ability only)',`gameTap('${iid}')`]:['⟳ Tap',`gameTap('${iid}')`],['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`],['↩ Return to hand',`gameMove('${iid}','battlefield','hand')`],['✦ Exile',`gameMove('${iid}','battlefield','exile')`]); if(c.cardId===g.commanderId) acts.push(['👑 To command zone',`gameMove('${iid}','battlefield','command')`]); }
   else if(zone==='graveyard') acts=[['↩ Return to hand',`gameMove('${iid}','graveyard','hand')`],['▶ To battlefield',`gameMove('${iid}','graveyard','battlefield')`],['↥ Top of library',`gameMove('${iid}','graveyard','libraryTop')`],['✦ Exile',`gameMove('${iid}','graveyard','exile')`]];
   else if(zone==='exile') acts=[['↩ Return to hand',`gameMove('${iid}','exile','hand')`],['▶ To battlefield',`gameMove('${iid}','exile','battlefield')`]];
   else if(zone==='command') acts=[['👑 Cast (to battlefield)',`castCommander('${iid}')`]];
