@@ -207,7 +207,8 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .zone.bf{background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:12px;padding:10px;min-height:84px}
 .zone-h{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px}
 .zone-cards{display:flex;flex-wrap:wrap;gap:6px}
-.gcard{width:48px;height:67px;border-radius:5px;background:var(--bg2) center/cover;border:1px solid var(--line);cursor:pointer;flex-shrink:0;transition:transform .08s}
+.gcard{position:relative;width:48px;height:67px;border-radius:5px;background:var(--bg2) center/cover;border:1px solid var(--line);cursor:pointer;flex-shrink:0;transition:transform .08s}
+.gcard-ctr{position:absolute;bottom:2px;right:2px;background:var(--ok);color:#0d0f1a;font-size:8px;font-weight:800;padding:1px 3px;border-radius:4px;line-height:1.1}
 .gcard:active{transform:scale(1.05)}
 .gcard.tapped{opacity:.45;filter:grayscale(.6);transform:rotate(10deg)}
 .gcard.noimg{display:flex;align-items:center;justify-content:center;padding:3px;background:var(--panel2)}
@@ -787,7 +788,7 @@ function tapAddMana(iid, color){
 function tapUses(iid){
   const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c) return [];
   const cd=card(c.cardId), uses=[];
-  const pw=creaturePower(cd);
+  const pw=creaturePower(cd)+(c.counters||0);
   if(cd && /\bCreature\b/.test(cd.type_line||'') && pw>0) uses.push({kind:'attack',idx:null,label:'⚔️ Attack — deal '+pw});
   if(cd && (/\bLand\b/.test(cd.type_line||'') || (cd.produced&&cd.produced.length))) uses.push({kind:'mana',idx:null,label:'🔵 Tap for mana'});
   ((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean).forEach((ab,i)=>{ const ci=ab.indexOf(':'); if(ci>0&&ci<40 && /\{T\}/.test(ab.slice(0,ci))) uses.push({kind:'ab',idx:i,label:'⚡ '+(ab.length>46?ab.slice(0,46)+'…':ab)}); });
@@ -803,11 +804,12 @@ function tapDo(iid, kind, idx){
   const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c){ closeModal(); return; }
   if(kind==='mana'){ tapForMana(iid); return; }
   c.tapped=true;
-  if(kind==='attack'){ const pw=creaturePower(card(c.cardId)); g.oppLife=(g.oppLife||0)-pw; if(g.oppLife<=0){ g.oppLife=0; toast('🏆 Hit for '+pw+' — opponent defeated!'); } else toast('⚔️ Attacked for '+pw); }
+  if(kind==='attack'){ const pw=creaturePower(card(c.cardId))+(c.counters||0); g.oppLife=(g.oppLife||0)-pw; if(g.oppLife<=0){ g.oppLife=0; toast('🏆 Hit for '+pw+' — opponent defeated!'); } else toast('⚔️ Attacked for '+pw); }
   else if(kind==='ab'){ const cd=card(c.cardId); const ab=(((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean))[idx]||''; toast('⚡ Used: '+(ab.length>44?ab.slice(0,44)+'…':ab)); }
   else toast('Tapped');
   closeModal(); render();
 }
+function addCounter(iid,n){ const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c) return; c.counters=Math.max(0,(c.counters||0)+n); render(); gameCardMenu(iid,'battlefield'); }
 function parseCost(mc){
   const need={generic:0,W:0,U:0,B:0,R:0,G:0,C:0};
   ((mc&&mc.match(/\{[^}]+\}/g))||[]).forEach(sym=>{
@@ -862,9 +864,9 @@ function gameMove(iid,from,to){
   }
   const c=arr.splice(idx,1)[0];
   if(to==='battlefield'){ c.tapped=false; g.battlefield.push(c); }
-  else if(to==='libraryTop'){ delete c.tapped; g.library.unshift(c); }
-  else if(to==='libraryBottom'){ delete c.tapped; g.library.push(c); }
-  else { delete c.tapped; g[to].push(c); }
+  else if(to==='libraryTop'){ delete c.tapped; delete c.counters; g.library.unshift(c); }
+  else if(to==='libraryBottom'){ delete c.tapped; delete c.counters; g.library.push(c); }
+  else { delete c.tapped; delete c.counters; g[to].push(c); }
   closeModal(); render();
 }
 function creaturePower(cd){ const p=parseInt(cd&&cd.power,10); return isNaN(p)?0:Math.max(0,p); }
@@ -918,6 +920,8 @@ function gameCardMenu(iid,zone){
     if(!c.tapped) acts.push(['⟳ Tap…',`tapCard('${iid}')`]);
     else if(hasUntapEnabler()) acts.push(['↺ Untap (you control an untap ability)',`gameTap('${iid}')`]);
     else acts.push(['🔒 Stays tapped — no untap card in play',`gameUntapInfo()`]);
+    acts.push(['➕ Add +1/+1 counter',`addCounter('${iid}',1)`]);
+    if((c.counters||0)>0) acts.push(['➖ Remove counter ('+(c.counters||0)+')',`addCounter('${iid}',-1)`]);
     acts.push(['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`]);
     if(hasReturnEnabler()) acts.push(['↩ Return to hand (you control a return ability)',`gameMove('${iid}','battlefield','hand')`]);
     acts.push(['✦ Exile',`gameMove('${iid}','battlefield','exile')`]);
@@ -944,7 +948,8 @@ function gameCardMenu(iid,zone){
 }
 function gameCardHTML(c,zone){
   const cd=card(c.cardId); const thumb=cd?(cd.thumb||cd.img):'';
-  return `<div class="gcard${c.tapped?' tapped':''}${thumb?'':' noimg'}" style="background-image:url('${thumb}')" onclick="gameCardMenu('${c.iid}','${zone}')">${thumb?'':`<span class="gcard-lbl">${esc(cd?cd.name:'?')}</span>`}</div>`;
+  const ctr=(zone==='battlefield'&&c.counters>0)?`<span class="gcard-ctr">+${c.counters}/+${c.counters}</span>`:'';
+  return `<div class="gcard${c.tapped?' tapped':''}${thumb?'':' noimg'}" style="background-image:url('${thumb}')" onclick="gameCardMenu('${c.iid}','${zone}')">${thumb?'':`<span class="gcard-lbl">${esc(cd?cd.name:'?')}</span>`}${ctr}</div>`;
 }
 function createToken(){
   const name=(window.prompt('Token name (e.g. "1/1 Soldier", "Treasure"):','Token')||'').trim();
@@ -1641,7 +1646,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,castFromHand,gameUntapInfo,createToken,useAbility,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
