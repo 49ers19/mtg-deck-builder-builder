@@ -1821,7 +1821,15 @@ function initFirebase(){
   if(!window.firebase) return;
   try{ firebase.initializeApp(FIREBASE_CONFIG); _auth=firebase.auth(); window._db=firebase.firestore(); _auth.onAuthStateChanged(handleAuth); }catch(e){}
 }
-function handleAuth(user){
+async function handleAuth(user){
+  if(user && window._db){
+    // invite-only: the email must exist in the "allowed" collection
+    try{
+      const email=(user.email||'').trim().toLowerCase();
+      const doc=await window._db.collection('allowed').doc(email).get();
+      if(!doc.exists){ toast('Invite-only — '+(email||'this account')+' isn’t approved'); await _auth.signOut(); state.user=null; updateAccountUI(); return; }
+    }catch(e){ toast('Access check failed — is your email approved?'); try{ await _auth.signOut(); }catch(_){} state.user=null; updateAccountUI(); return; }
+  }
   state.user=user||null; updateAccountUI();
   if(user) subscribeCloud(user.uid);
   else if(window._cloudUnsub){ window._cloudUnsub(); window._cloudUnsub=null; }
