@@ -784,6 +784,30 @@ function tapAddMana(iid, color){
   c.tapped=true; g.pool[color]=(g.pool[color]||0)+1;
   closeModal(); render();
 }
+function tapUses(iid){
+  const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c) return [];
+  const cd=card(c.cardId), uses=[];
+  const pw=creaturePower(cd);
+  if(cd && /\bCreature\b/.test(cd.type_line||'') && pw>0) uses.push({kind:'attack',idx:null,label:'⚔️ Attack — deal '+pw});
+  if(cd && (/\bLand\b/.test(cd.type_line||'') || (cd.produced&&cd.produced.length))) uses.push({kind:'mana',idx:null,label:'🔵 Tap for mana'});
+  ((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean).forEach((ab,i)=>{ const ci=ab.indexOf(':'); if(ci>0&&ci<40 && /\{T\}/.test(ab.slice(0,ci))) uses.push({kind:'ab',idx:i,label:'⚡ '+(ab.length>46?ab.slice(0,46)+'…':ab)}); });
+  return uses;
+}
+function tapCard(iid){
+  const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c||c.tapped){ closeModal(); return; }
+  const uses=tapUses(iid);
+  if(uses.length<=1){ tapDo(iid, uses[0]?uses[0].kind:'tap', uses[0]?uses[0].idx:null); return; }
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Tap for…</h3><div class="addmenu">${uses.map(u=>`<button class="btn full" onclick="tapDo('${iid}','${u.kind}',${u.idx==null?'null':u.idx})">${u.label}</button>`).join('')}<button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div></div>`;
+}
+function tapDo(iid, kind, idx){
+  const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c){ closeModal(); return; }
+  if(kind==='mana'){ tapForMana(iid); return; }
+  c.tapped=true;
+  if(kind==='attack'){ const pw=creaturePower(card(c.cardId)); g.oppLife=(g.oppLife||0)-pw; if(g.oppLife<=0){ g.oppLife=0; toast('🏆 Hit for '+pw+' — opponent defeated!'); } else toast('⚔️ Attacked for '+pw); }
+  else if(kind==='ab'){ const cd=card(c.cardId); const ab=(((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean))[idx]||''; toast('⚡ Used: '+(ab.length>44?ab.slice(0,44)+'…':ab)); }
+  else toast('Tapped');
+  closeModal(); render();
+}
 function parseCost(mc){
   const need={generic:0,W:0,U:0,B:0,R:0,G:0,C:0};
   ((mc&&mc.match(/\{[^}]+\}/g))||[]).forEach(sym=>{
@@ -891,8 +915,7 @@ function gameCardMenu(iid,zone){
   }
   else if(zone==='battlefield'){
     acts=[];
-    if(canTapMana&&!c.tapped) acts.push(['🔵 Tap for mana',`tapForMana('${iid}')`]);
-    if(!c.tapped) acts.push(['⟳ Tap',`gameTap('${iid}')`]);
+    if(!c.tapped) acts.push(['⟳ Tap…',`tapCard('${iid}')`]);
     else if(hasUntapEnabler()) acts.push(['↺ Untap (you control an untap ability)',`gameTap('${iid}')`]);
     else acts.push(['🔒 Stays tapped — no untap card in play',`gameUntapInfo()`]);
     acts.push(['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`]);
@@ -905,10 +928,9 @@ function gameCardMenu(iid,zone){
   else if(zone==='command'){ const tax=g.cmdTax||0; acts=[['👑 Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):'')+(tax?' +{'+tax+'}':''),`castCommander('${iid}',false)`]]; }
   const abLines=(cd&&cd.text)?cd.text.split('\n').map(s=>s.trim()).filter(Boolean):[];
   const abilitiesHTML = abLines.length
-    ? `<div class="section-title" style="margin:2px 2px 6px">Abilities <span class="tiny muted" style="text-transform:none;letter-spacing:0">· activated = manual, triggered/passive = auto</span></div>`+abLines.map((ab,i)=>{
+    ? `<div class="section-title" style="margin:2px 2px 6px">Abilities <span class="tiny muted" style="text-transform:none;letter-spacing:0">· activated: tap the card on the battlefield</span></div>`+abLines.map((ab)=>{
         const cls=classifyAbility(ab);
-        if(cls==='activated' && zone==='battlefield') return `<button class="btn full abil" onclick="useAbility('${iid}','${zone}',${i})"><span class="abil-tag tag-use">USE</span><span>${esc(ab)}</span></button>`;
-        const tag=cls==='triggered'?'AUTO · TRIGGER':cls==='static'?'AUTO · PASSIVE':(zone==='hand'?'ACTIVATED · not from hand':'ACTIVATED');
+        const tag=cls==='triggered'?'AUTO · TRIGGER':cls==='static'?'AUTO · PASSIVE':'ACTIVATED';
         return `<div class="abil-info"><span class="abil-tag">${tag}</span><span>${esc(ab)}</span></div>`;
       }).join('')
     : '';
@@ -1619,7 +1641,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,castFromHand,gameUntapInfo,createToken,useAbility,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,castFromHand,gameUntapInfo,createToken,useAbility,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
