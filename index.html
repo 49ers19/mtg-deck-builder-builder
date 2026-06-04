@@ -300,6 +300,7 @@ function cacheCard(c){
       produced:c.produced_mana||[],
       text: oracleText(c),
       ci: c.color_identity||[],
+      power: (c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null,
     };
   }
   return state.cards[c.id];
@@ -717,14 +718,14 @@ function startGame(deckId){
   enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[]));
 }
 async function enrichGameCards(ids){
-  const missing=[...new Set(ids)].filter(id=>state.cards[id] && state.cards[id].text===undefined);
+  const missing=[...new Set(ids)].filter(id=>state.cards[id] && (state.cards[id].text===undefined || state.cards[id].power===undefined));
   if(!missing.length) return;
   for(let i=0;i<missing.length;i+=75){
     const chunk=missing.slice(i,i+75);
     try{
       const r=await fetch('https://api.scryfall.com/cards/collection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifiers:chunk.map(id=>({id}))})});
       const d=await r.json();
-      (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); } });
+      (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); e.power=(c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null; } });
     }catch(e){}
   }
   DB.save(); if(state.game) render();
@@ -821,7 +822,19 @@ function gameMove(iid,from,to){
   else { delete c.tapped; g[to].push(c); }
   closeModal(); render();
 }
-function gameTap(iid){ const c=state.game.battlefield.find(x=>x.iid===iid); if(c){ c.tapped=!c.tapped; toast(c.tapped?'Tapped':'Untapped (ability)'); } closeModal(); render(); }
+function creaturePower(cd){ const p=parseInt(cd&&cd.power,10); return isNaN(p)?0:Math.max(0,p); }
+function gameTap(iid){
+  const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c){ closeModal(); return; }
+  if(c.tapped){ c.tapped=false; toast('Untapped (ability)'); closeModal(); render(); return; }
+  c.tapped=true;
+  const cd=card(c.cardId);
+  if(cd && /\bCreature\b/.test(cd.type_line||'')){
+    const pw=creaturePower(cd);
+    if(pw>0){ g.oppLife=(g.oppLife||0)-pw; if(g.oppLife<=0){ g.oppLife=0; toast('🏆 Hit for '+pw+' — opponent defeated!'); } else toast('⚔️ Attacked for '+pw); }
+    else toast('Tapped (0 power)');
+  } else toast('Tapped');
+  closeModal(); render();
+}
 function castCommander(iid, ignoreMana){
   const g=state.game, c=g.command.find(x=>x.iid===iid); if(!c) return;
   const cd=card(c.cardId);
@@ -841,7 +854,7 @@ function gameCardMenu(iid,zone){
   let acts=[];
   if(zone==='hand'){
     if(isLand) acts=[['▶ Play to battlefield',`gameMove('${iid}','hand','battlefield')`],['🌍 Play as extra land (ability)',`playExtraLand('${iid}')`]];
-    else acts=[['▶ Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):''),`castFromHand('${iid}',false)`],['▶ Play (ignore mana)',`castFromHand('${iid}',true)`]];
+    else acts=[['▶ Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):''),`castFromHand('${iid}',false)`]];
     acts.push(['⚰ Discard',`gameMove('${iid}','hand','graveyard')`],['✦ Exile',`gameMove('${iid}','hand','exile')`],['↧ Bottom of library',`gameMove('${iid}','hand','libraryBottom')`]);
   }
   else if(zone==='battlefield'){
@@ -855,7 +868,7 @@ function gameCardMenu(iid,zone){
   }
   else if(zone==='graveyard') acts=[['↩ Return to hand',`gameMove('${iid}','graveyard','hand')`],['▶ To battlefield',`gameMove('${iid}','graveyard','battlefield')`],['↥ Top of library',`gameMove('${iid}','graveyard','libraryTop')`],['✦ Exile',`gameMove('${iid}','graveyard','exile')`]];
   else if(zone==='exile') acts=[['↩ Return to hand',`gameMove('${iid}','exile','hand')`],['▶ To battlefield',`gameMove('${iid}','exile','battlefield')`]];
-  else if(zone==='command'){ const tax=g.cmdTax||0; acts=[['👑 Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):'')+(tax?' +{'+tax+'}':''),`castCommander('${iid}',false)`],['👑 Cast (ignore mana)',`castCommander('${iid}',true)`]]; }
+  else if(zone==='command'){ const tax=g.cmdTax||0; acts=[['👑 Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):'')+(tax?' +{'+tax+'}':''),`castCommander('${iid}',false)`]]; }
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
     <h3>${cd?esc(cd.name):'Card'}</h3>
     ${img?`<img src="${img}" style="width:150px;border-radius:11px;display:block;margin:0 auto 12px">`:''}
