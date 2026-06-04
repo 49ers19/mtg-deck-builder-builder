@@ -439,7 +439,8 @@ function renderDeckDetail(){
       <div class="stat"><div class="v">${n}</div><div class="l">Cards</div></div>
       <div class="stat"><div class="v">${lands}</div><div class="l">Lands</div></div>
       <div class="stat"><div class="v">${avg}</div><div class="l">Avg CMC</div></div>
-    </div>`;
+    </div>
+    <button class="btn gold full" style="margin-bottom:12px" onclick="startAddingTo('${d.id}')">＋ Add cards to this deck</button>`;
 
   // color identity bar
   if(total){
@@ -461,9 +462,9 @@ function renderDeckDetail(){
 
   // card list grouped
   if(!n){
-    h += `<div class="empty"><div class="big">🃏</div><div class="t">Empty deck</div>
-      <div class="tiny">Head to Search to add cards.</div>
-      <button class="btn gold full" style="margin-top:16px" onclick="setTab('search')">🔍 Find cards</button></div>`;
+    h += `<div class="empty"><div class="big">🃏</div><div class="t">No cards yet</div>
+      <div class="tiny">Add the rest of your deck — search and tap ＋.</div>
+      <button class="btn gold full" style="margin-top:16px" onclick="startAddingTo('${d.id}')">🔍 Add cards</button></div>`;
   } else {
     for(const g of groups){
       h += `<div class="grp"><span>${g.name}</span><span>${g.count}</span></div>`;
@@ -514,12 +515,16 @@ function manaText(m){ return m? m.replace(/[{}]/g,'').replace(/\//g,'/') || '—
 // ---------- SEARCH ----------
 function renderSearch(){
   const picking = state.pickCommanderFor ? state.decks.find(x=>x.id===state.pickCommanderFor) : null;
+  const adding = (!picking && state.addToDeckId) ? state.decks.find(x=>x.id===state.addToDeckId) : null;
   let h = '';
   if(picking){
     h += `<div class="pick-banner">👑 Choosing commander for <b>${esc(picking.name)}</b><button onclick="cancelPickCommander()">Cancel</button></div>`;
   }
+  if(adding){
+    h += `<div class="pick-banner">🗂️ Adding to <b>${esc(adding.name)}</b><button onclick="finishAdding()">Done</button></div>`;
+  }
   h += `<div class="search-wrap">
-      <input id="searchInput" placeholder="${picking?'Search for a commander…':'Search cards, e.g. lightning bolt'}" value="${esc(state.searchQuery)}" autocomplete="off">
+      <input id="searchInput" placeholder="${picking?'Search for a commander…':adding?'Search cards to add…':'Search cards, e.g. lightning bolt'}" value="${esc(state.searchQuery)}" autocomplete="off">
       <div id="searchSpin" class="spin hidden"></div>
     </div>`;
   if(!state.searchQuery.trim()){
@@ -532,13 +537,14 @@ function renderSearch(){
   } else {
     state.searchResults.forEach(c=>{
       const owned = state.collection[c.id]||0;
+      const inDeck = adding ? (adding.cards[c.id]||0) : 0;
       h += `<div class="cardrow">
         <div class="thumb" style="background-image:url('${(c.image_uris&&c.image_uris.small)||((c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small))||''}')" onclick="showCardObj(${esc(JSON.stringify(c.id))})"></div>
         <div class="info">
           <div class="nm">${esc(c.name)} ${pips(c.colors&&c.colors.length?c.colors:(c.color_identity||[]))}</div>
-          <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}</div>
+          <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${inDeck?` · <span style="color:var(--accent2)">${inDeck} in deck</span>`:owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}</div>
         </div>
-        <button class="btn gold sm" onclick="${picking?`setCommander('${picking.id}','${c.id}')`:`addMenu('${c.id}')`}">${picking?'Set':'Add'}</button>
+        <button class="btn gold sm" onclick="${picking?`setCommander('${picking.id}','${c.id}')`:adding?`addToDeckDirect('${adding.id}','${c.id}')`:`addMenu('${c.id}')`}">${picking?'Set':adding?'＋':'Add'}</button>
       </div>`;
     });
   }
@@ -806,7 +812,7 @@ function copyShare(){ const u=shareUrl(); if(navigator.clipboard&&navigator.clip
 // ============================================================
 //  ACTIONS
 // ============================================================
-function setTab(t){ state.pickCommanderFor=null; state.tab=t; state.openDeckId=null; render(); if(t==='search') setTimeout(()=>$('#searchInput')?.focus(),50); }
+function setTab(t){ state.pickCommanderFor=null; state.addToDeckId=null; state.tab=t; state.openDeckId=null; render(); if(t==='search') setTimeout(()=>$('#searchInput')?.focus(),50); }
 function openDeck(id){ state.openDeckId=id; render(); }
 function closeDeck(){ state.openDeckId=null; render(); }
 
@@ -829,6 +835,20 @@ function removeCommander(deckId){
   d.commander=null; DB.save(); renderDeckDetail();
 }
 function cancelPickCommander(){ state.pickCommanderFor=null; state.tab='decks'; render(); }
+
+// ---------- Add cards directly to an open deck ----------
+function startAddingTo(deckId){
+  state.addToDeckId=deckId; state.openDeckId=deckId; state.tab='search';
+  state.searchQuery=''; state.searchResults=[];
+  render(); setTimeout(()=>$('#searchInput')?.focus(),60);
+}
+function addToDeckDirect(deckId,cardId){
+  const c=state._resultMap&&state._resultMap[cardId]; if(c) cacheCard(c);
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  d.cards[cardId]=(d.cards[cardId]||0)+1;
+  DB.save(); toast('Added to '+d.name); renderSearch();
+}
+function finishAdding(){ state.addToDeckId=null; state.tab='decks'; render(); }
 
 // ---------- Official precons (loaded from precons.json; seed = offline fallback) ----------
 let PRECONS = [];
@@ -1341,6 +1361,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
+  startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
   setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,
