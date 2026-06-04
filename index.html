@@ -34,6 +34,13 @@ header{padding:calc(env(safe-area-inset-top) + 14px) 16px 12px;background:linear
 .brand{font-size:20px;font-weight:700;letter-spacing:.5px;color:var(--accent2);display:flex;align-items:center;gap:9px}
 .brand .gem{width:16px;height:16px;transform:rotate(45deg);background:linear-gradient(135deg,var(--accent2),var(--accent));border-radius:3px;box-shadow:0 0 12px rgba(227,193,75,.5)}
 .sub{font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:.3px}
+.install-btn{position:absolute;top:calc(env(safe-area-inset-top) + 14px);right:14px;background:linear-gradient(180deg,var(--accent2),var(--accent));color:#23200a;border:1px solid var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700}
+.filt-bar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.filt{background:var(--bg2);border:1px solid var(--line);border-radius:9px;color:var(--text);font-size:12px;padding:8px 9px;font-family:inherit}
+.filt-q{flex:1 1 130px;min-width:120px}
+.filt-q:focus,select.filt:focus{outline:none;border-color:var(--accent)}
+.filt-clr{cursor:pointer;font-weight:700;color:var(--muted)}
+select.filt{flex:0 0 auto}
 
 /* Main scroll area */
 main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 14px calc(86px + var(--safe-b))}
@@ -238,6 +245,7 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 <header>
   <div class="brand"><span class="gem"></span>Planar Deckbox</div>
   <div class="sub" id="subtitle">Magic: The Gathering deck builder &amp; collection</div>
+  <button id="installBtn" class="install-btn hidden" onclick="installApp()">⤓ Install</button>
 </header>
 
 <main id="main"></main>
@@ -247,6 +255,7 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
   <button data-tab="search"><span class="ic">🔍</span>Search</button>
   <button data-tab="collection"><span class="ic">📚</span>Collection</button>
   <button data-tab="play"><span class="ic">⚔️</span>Play</button>
+  <button data-tab="analyze"><span class="ic">📊</span>Analyze</button>
 </nav>
 
 <div id="modalRoot"></div>
@@ -289,6 +298,8 @@ const state = {
   play: { count:2, start:40, life:[40,40], poison:[0,0], cmd:[[0,0],[0,0]], mode:'life' },
   game: null,
   session: null,
+  collFilter: { q:'', type:'', color:'', cmc:'', rarity:'' },
+  analyzeDeckId: null,
 };
 
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -356,8 +367,9 @@ function render(){
   else if(state.tab==='search') renderSearch();
   else if(state.tab==='collection') renderCollection();
   else if(state.tab==='play') renderPlay();
+  else if(state.tab==='analyze') renderAnalyze();
   $('#subtitle').textContent = ({
-    decks:'Your decks', search:'Find cards on Scryfall', collection:'Cards you own', play:'Life counter & playtest'
+    decks:'Your decks', search:'Find cards on Scryfall', collection:'Cards you own', play:'Life counter & playtest', analyze:'Deck analysis'
   })[state.tab] || '';
 }
 
@@ -592,30 +604,100 @@ function renderSearch(){
 }
 
 // ---------- COLLECTION ----------
+function setCollFilter(key,val){
+  state.collFilter[key]=val; renderCollection();
+  if(key==='q'){ const i=$('#collQ'); if(i){ i.focus(); const v=i.value; i.value=''; i.value=v; } }
+}
+function clearCollFilter(){ state.collFilter={q:'',type:'',color:'',cmc:'',rarity:''}; renderCollection(); }
 function renderCollection(){
+  const f=state.collFilter;
   const ids = Object.keys(state.collection).filter(id=>state.collection[id]>0);
-  ids.sort((a,b)=> (card(a)?.name||'').localeCompare(card(b)?.name||''));
-  let totalCards=0, totalVal=0, unique=ids.length;
+  let totalCards=0, totalVal=0; const unique=ids.length;
   ids.forEach(id=>{ totalCards+=state.collection[id]; const p=card(id)?.price; if(p) totalVal+=parseFloat(p)*state.collection[id]; });
+  const fq=f.q.toLowerCase().trim();
+  let shown = ids.filter(id=>{
+    const c=card(id); if(!c) return false;
+    if(fq && !c.name.toLowerCase().includes(fq)) return false;
+    if(f.type && !new RegExp('\\b'+f.type+'\\b','i').test(c.type_line||'')) return false;
+    if(f.color){ const cols=c.colors||[]; if(f.color==='C'){ if(cols.length) return false; } else if(f.color==='M'){ if(cols.length<2) return false; } else if(!cols.includes(f.color)) return false; }
+    if(f.cmc!==''){ const cmc=Math.floor(c.cmc||0); if(f.cmc==='7'){ if(cmc<7) return false; } else if(cmc!==+f.cmc) return false; }
+    if(f.rarity && (c.rarity||'')!==f.rarity) return false;
+    return true;
+  });
+  shown.sort((a,b)=> (card(a).cmc||0)-(card(b).cmc||0) || card(a).name.localeCompare(card(b).name));
 
   let h = `<div class="statgrid">
       <div class="stat"><div class="v">${totalCards}</div><div class="l">Total</div></div>
       <div class="stat"><div class="v">${unique}</div><div class="l">Unique</div></div>
       <div class="stat"><div class="v">$${totalVal.toFixed(0)}</div><div class="l">Est. Value</div></div>
     </div>
-    <button class="btn gold full" style="margin-bottom:14px" onclick="openScanner()">📷 Scan a card</button>`;
+    <button class="btn gold full" style="margin-bottom:12px" onclick="openScanner()">📷 Scan a card</button>`;
   if(!ids.length){
     h += `<div class="empty"><div class="big">📚</div><div class="t">Empty collection</div>
       <div class="tiny">Add cards you own from the Search tab.</div>
       <button class="btn gold full" style="margin-top:16px" onclick="setTab('search')">🔍 Add cards</button></div>`;
   } else {
-    h += `<div class="section-title">Owned Cards</div>`;
-    ids.forEach(id=>{
-      const c=card(id); if(!c) return;
-      h += cardRowHTML(c, state.collection[id], `collQty('${id}',-1)`, `collQty('${id}',1)`);
-    });
+    const sel=(key,opts,label)=>`<select class="filt" onchange="setCollFilter('${key}',this.value)"><option value="">${label}</option>${opts.map(([v,t])=>`<option value="${v}" ${f[key]===v?'selected':''}>${t}</option>`).join('')}</select>`;
+    const active = f.q||f.type||f.color||f.cmc!==''||f.rarity;
+    h += `<div class="filt-bar">
+        <input id="collQ" class="filt filt-q" placeholder="Filter by name…" value="${esc(f.q)}" oninput="setCollFilter('q',this.value)" autocomplete="off">
+        ${sel('type',[['Creature','Creature'],['Instant','Instant'],['Sorcery','Sorcery'],['Artifact','Artifact'],['Enchantment','Enchantment'],['Planeswalker','Planeswalker'],['Land','Land']],'Type')}
+        ${sel('color',[['W','White'],['U','Blue'],['B','Black'],['R','Red'],['G','Green'],['C','Colorless'],['M','Multicolor']],'Color')}
+        ${sel('cmc',[['0','CMC 0'],['1','CMC 1'],['2','CMC 2'],['3','CMC 3'],['4','CMC 4'],['5','CMC 5'],['6','CMC 6'],['7','CMC 7+']],'Cost')}
+        ${sel('rarity',[['common','Common'],['uncommon','Uncommon'],['rare','Rare'],['mythic','Mythic']],'Rarity')}
+        ${active?`<button class="filt filt-clr" onclick="clearCollFilter()">✕ Clear</button>`:''}
+      </div>
+      <div class="section-title">Owned Cards (${shown.length}${shown.length!==unique?' of '+unique:''})</div>`;
+    if(!shown.length) h += `<div class="empty" style="padding:30px 20px"><div class="t">No cards match these filters</div></div>`;
+    else shown.forEach(id=>{ h += cardRowHTML(card(id), state.collection[id], `collQty('${id}',-1)`, `collQty('${id}',1)`); });
   }
   main.innerHTML = h;
+}
+
+// ---------- ANALYZE ----------
+function selectAnalyzeDeck(id){ state.analyzeDeckId=id; render(); }
+function closeAnalyze(){ state.analyzeDeckId=null; render(); }
+function renderAnalyze(){
+  const decks=state.decks;
+  if(!state.analyzeDeckId || !decks.find(d=>d.id===state.analyzeDeckId)){
+    let h=`<div class="section-title">Analyze a deck</div>`;
+    if(!decks.length) h+=`<div class="empty"><div class="big">📊</div><div class="t">No decks to analyze</div><div class="tiny">Build or import a deck first.</div></div>`;
+    else decks.forEach(d=>{ const cmd=d.commander&&card(d.commander); h+=`<div class="decktile" onclick="selectAnalyzeDeck('${d.id}')"><div class="col"><div class="dn">${esc(d.name)}</div><div class="ds">${cmd?'👑 '+esc(cmd.name):(d.format||'Casual')} · ${deckCardCount(d)} cards</div></div><div style="font-size:20px;color:var(--muted)">📊</div></div>`; });
+    main.innerHTML=h; return;
+  }
+  const d=decks.find(x=>x.id===state.analyzeDeckId);
+  const n=deckCardCount(d); const {counts,total}=deckColorCounts(d);
+  const buckets=[0,0,0,0,0,0,0,0]; let lands=0, avgNum=0, avgDen=0;
+  for(const id in d.cards){ const c=card(id); if(!c) continue; const q=d.cards[id]; if(/\bLand\b/.test(c.type_line||'')){ lands+=q; continue; } const b=Math.min(7,Math.floor(c.cmc||0)); buckets[b]+=q; avgNum+=(c.cmc||0)*q; avgDen+=q; }
+  const maxB=Math.max(1,...buckets); const avg=avgDen?(avgNum/avgDen).toFixed(2):'0.00';
+  const groups=groupDeckCards(d);
+  const isCmd=d.format==='Commander';
+  const notes=[];
+  if(isCmd && n<100) notes.push('⚠️ '+(100-n)+' cards short of 100.');
+  if(lands < (isCmd?34:22)) notes.push('⚠️ Light on lands ('+lands+'). Typical: '+(isCmd?'36–38':'~24')+'.');
+  else if(lands > (isCmd?42:28)) notes.push('ℹ️ High land count ('+lands+').');
+  if(avgDen && +avg>3.8) notes.push('ℹ️ High average mana value ('+avg+') — the deck may play slowly.');
+  if(!notes.length) notes.push('✓ Land count and curve look reasonable.');
+
+  let h=`<div class="detail-head"><button class="back" onclick="closeAnalyze()">‹</button><div class="ttl">${esc(d.name)}</div></div>
+    <div class="statgrid"><div class="stat"><div class="v">${n}</div><div class="l">Cards</div></div><div class="stat"><div class="v">${lands}</div><div class="l">Lands</div></div><div class="stat"><div class="v">${avg}</div><div class="l">Avg MV</div></div></div>`;
+  h+=`<div class="panel"><div class="section-title" style="margin-top:0">Card Types</div><div class="row" style="flex-wrap:wrap;gap:12px">${groups.map(g=>`<span class="tiny muted">${g.name}: <b style="color:var(--text)">${g.count}</b></span>`).join('')||'<span class="tiny muted">No cards yet</span>'}</div></div>`;
+  if(total){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Colors</div><div class="row" style="flex-wrap:wrap;gap:10px">`; Object.keys(counts).filter(k=>counts[k]).forEach(k=>{ h+=`<div class="row" style="gap:5px">${pips([k])}<span class="tiny muted">${COLOR_NAMES[k]} ${counts[k]}</span></div>`; }); h+=`</div></div>`; }
+  if(avgDen){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Mana Curve (nonland)</div><div class="curve">`; buckets.forEach((cnt,i)=>{ h+=`<div class="bar"><span class="cnt">${cnt||''}</span><div class="fill" style="height:${cnt/maxB*100}%"></div><span class="lbl">${i===7?'7+':i}</span></div>`; }); h+=`</div></div>`; }
+  h+=`<div class="panel"><div class="section-title" style="margin-top:0">Deck Health</div>${notes.map(x=>`<div class="tiny" style="margin-bottom:5px">${x}</div>`).join('')}</div>`;
+  h+=`<div class="panel" style="opacity:.75"><div class="section-title" style="margin-top:0">Card Recommendations</div><div class="tiny muted">Coming soon — suggested cards for your commander (planned via EDHREC). Free, no account needed.</div></div>`;
+  main.innerHTML=h;
+}
+
+// ---------- INSTALL (PWA) ----------
+let deferredPrompt=null;
+function isStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true; }
+window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); deferredPrompt=e; const b=$('#installBtn'); if(b&&!isStandalone()) b.classList.remove('hidden'); });
+window.addEventListener('appinstalled',()=>{ const b=$('#installBtn'); if(b) b.classList.add('hidden'); deferredPrompt=null; });
+function installApp(){
+  if(deferredPrompt){ deferredPrompt.prompt(); deferredPrompt.userChoice.finally(()=>{ deferredPrompt=null; const b=$('#installBtn'); if(b) b.classList.add('hidden'); }); return; }
+  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Install Planar Deckbox</h3><div class="tiny" style="line-height:1.7">${ios?'On iPhone/iPad (Safari): tap the <b>Share</b> button (□↑), then <b>Add to Home Screen</b>.':'Phone: open your browser menu (⋮) → <b>Install app</b> / <b>Add to Home screen</b>.<br><br>Computer (Chrome/Edge): click the <b>install icon</b> (⊕ / monitor) at the right of the address bar, or menu → <b>Install Planar Deckbox</b>.'}</div><button class="btn gold full" style="margin-top:14px" onclick="closeModal()">Got it</button></div></div>`;
 }
 
 // ---------- PLAY (life counter) ----------
@@ -1651,6 +1733,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
+  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,installApp,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
   setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,
   openShare,joinRoom,leaveSession,copyShare});
@@ -1659,6 +1742,9 @@ render();
 
 // Auto-join a shared life-counter room from a ?room=CODE link.
 (()=>{ const rm=new URLSearchParams(location.search).get('room'); if(rm) joinRoom(rm); })();
+
+// Show the install button (unless already installed) so it's discoverable on phone + computer.
+window.addEventListener('load',()=>{ if(!isStandalone()){ const b=$('#installBtn'); if(b) b.classList.remove('hidden'); } });
 
 // Register service worker so the app installs to the home screen and works offline.
 if('serviceWorker' in navigator){
