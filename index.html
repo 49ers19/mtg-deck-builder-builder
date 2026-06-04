@@ -35,7 +35,9 @@ header{padding:calc(env(safe-area-inset-top) + 14px) 16px 12px;background:linear
 .brand{font-size:20px;font-weight:700;letter-spacing:.5px;color:var(--accent2);display:flex;align-items:center;gap:9px}
 .brand .gem{width:16px;height:16px;transform:rotate(45deg);background:linear-gradient(135deg,var(--accent2),var(--accent));border-radius:3px;box-shadow:0 0 12px rgba(227,193,75,.5)}
 .sub{font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:.3px}
-.install-btn{position:absolute;top:calc(env(safe-area-inset-top) + 14px);right:14px;background:linear-gradient(180deg,var(--accent2),var(--accent));color:#23200a;border:1px solid var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700}
+.hdr-actions{position:absolute;top:calc(env(safe-area-inset-top) + 13px);right:12px;display:flex;gap:6px}
+.hdr-btn{background:linear-gradient(180deg,var(--accent2),var(--accent));color:#23200a;border:1px solid var(--accent);border-radius:9px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}
+.hdr-btn.acct{background:var(--panel2);color:var(--text);border-color:var(--line)}
 .filt-bar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .filt{background:var(--bg2);border:1px solid var(--line);border-radius:9px;color:var(--text);font-size:12px;padding:8px 9px;font-family:inherit}
 .filt-q{flex:1 1 130px;min-width:120px}
@@ -246,7 +248,10 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 <header>
   <div class="brand"><span class="gem"></span>Grimoire Games</div>
   <div class="sub" id="subtitle">Magic: The Gathering deck builder &amp; collection</div>
-  <button id="installBtn" class="install-btn hidden" onclick="installApp()">⤓ Install</button>
+  <div class="hdr-actions">
+    <button id="acctBtn" class="hdr-btn acct" onclick="openAccount()">👤 Sign in</button>
+    <button id="installBtn" class="hdr-btn hidden" onclick="installApp()">⤓ Install</button>
+  </div>
 </header>
 
 <main id="main"></main>
@@ -262,6 +267,9 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 <div id="modalRoot"></div>
 <div id="toastRoot"></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
 // ============================================================
 //  GRIMOIRE GAMES — MTG deck builder + collection tracker
@@ -285,6 +293,7 @@ const DB = {
     localStorage.setItem('pdb_decks', JSON.stringify(state.decks));
     localStorage.setItem('pdb_collection', JSON.stringify(state.collection));
     localStorage.setItem('pdb_cards', JSON.stringify(state.cards));
+    if(state.user && !window._applyingRemote) scheduleCloudPush();
   }
 };
 const loaded = DB.load();
@@ -302,6 +311,7 @@ const state = {
   collFilter: { q:'', type:'', color:'', cmc:'', rarity:'' },
   analyzeDeckId: null,
   analyzeRecs: {},
+  user: null,
 };
 
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -1795,6 +1805,97 @@ function scanDismiss(){
   setScanStatus('',false);
 }
 
+// ============================================================
+//  ACCOUNTS + CLOUD SYNC (Firebase)
+// ============================================================
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyB2bB6U0aQVzwuKb47InTmPADDXtcVUXmk",
+  authDomain: "grimoire-games-9d13e.firebaseapp.com",
+  projectId: "grimoire-games-9d13e",
+  storageBucket: "grimoire-games-9d13e.firebasestorage.app",
+  messagingSenderId: "672879619179",
+  appId: "1:672879619179:web:08be8cedc034df44d5d52e"
+};
+let _auth=null;
+function initFirebase(){
+  if(!window.firebase) return;
+  try{ firebase.initializeApp(FIREBASE_CONFIG); _auth=firebase.auth(); window._db=firebase.firestore(); _auth.onAuthStateChanged(handleAuth); }catch(e){}
+}
+function handleAuth(user){
+  state.user=user||null; updateAccountUI();
+  if(user) subscribeCloud(user.uid);
+  else if(window._cloudUnsub){ window._cloudUnsub(); window._cloudUnsub=null; }
+}
+function updateAccountUI(){
+  const b=$('#acctBtn'); if(!b) return;
+  if(state.user){ const nm=state.user.displayName||state.user.email||'Account'; b.textContent='👤 '+(nm.length>12?nm.slice(0,12)+'…':nm); }
+  else b.textContent='👤 Sign in';
+}
+function openAccount(){
+  if(state.user){
+    modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Account</h3>
+      <div class="tiny muted" style="margin-bottom:5px">Signed in as</div>
+      <div style="font-weight:700;margin-bottom:14px">${esc(state.user.displayName||state.user.email||'')}</div>
+      <div class="tiny muted" style="margin-bottom:14px">✓ Your decks &amp; collection sync to this account across all your devices.</div>
+      <button class="btn danger full" onclick="signOutUser()">Sign out</button>
+      <button class="btn ghost full" style="margin-top:8px" onclick="closeModal()">Close</button></div></div>`;
+    return;
+  }
+  if(!_auth){ toast('Sign-in unavailable — check your connection'); return; }
+  showLogin(false);
+}
+function showLogin(signup){
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>${signup?'Create account':'Sign in'}</h3>
+    <button class="btn full" style="background:#fff;color:#202124;border-color:#fff;font-weight:700" onclick="googleSignIn()">Continue with Google</button>
+    <div style="text-align:center;color:var(--muted);font-size:11px;margin:12px 0">— or with email —</div>
+    <div class="field"><label>Email</label><input id="authEmail" class="scan-input" type="email" autocomplete="email"></div>
+    <div class="field"><label>Password</label><input id="authPw" class="scan-input" type="password" autocomplete="${signup?'new-password':'current-password'}"></div>
+    <button class="btn gold full" onclick="emailAuth(${signup})">${signup?'Create account':'Sign in'}</button>
+    <button class="btn ghost full" style="margin-top:8px" onclick="showLogin(${!signup})">${signup?'Have an account? Sign in':'New here? Create an account'}</button>
+    <button class="btn ghost full" style="margin-top:4px" onclick="closeModal()">Cancel</button>
+  </div></div>`;
+  setTimeout(()=>$('#authEmail')?.focus(),50);
+}
+function googleSignIn(){ const p=new firebase.auth.GoogleAuthProvider(); _auth.signInWithPopup(p).then(()=>{ closeModal(); toast('Signed in'); }).catch(e=>toast('Google: '+(e.code||e.message||'').replace('auth/',''))); }
+function emailAuth(signup){
+  const email=($('#authEmail')&&$('#authEmail').value||'').trim(), pw=($('#authPw')&&$('#authPw').value)||'';
+  if(!email||!pw){ toast('Enter email and password'); return; }
+  const fn=signup?_auth.createUserWithEmailAndPassword(email,pw):_auth.signInWithEmailAndPassword(email,pw);
+  fn.then(()=>{ closeModal(); toast(signup?'Account created':'Signed in'); }).catch(e=>toast((e.code||e.message||'').replace('auth/','')));
+}
+function signOutUser(){ if(_auth) _auth.signOut(); closeModal(); toast('Signed out'); }
+// cloud sync
+let cloudPushTimer=null;
+function scheduleCloudPush(){ if(!state.user||!window._db) return; clearTimeout(cloudPushTimer); cloudPushTimer=setTimeout(pushCloud,1200); }
+function pushCloud(){ if(!state.user||!window._db) return; window._db.collection('users').doc(state.user.uid).set({decks:state.decks,collection:state.collection,cards:state.cards,_ts:Date.now()}).catch(()=>{}); }
+function mergeData(cloud, local){
+  if(!cloud) return local;
+  const ids=new Set((cloud.decks||[]).map(d=>d.id));
+  const decks=[...(cloud.decks||[]), ...local.decks.filter(d=>!ids.has(d.id))];
+  const collection={...(cloud.collection||{})};
+  for(const k in (local.collection||{})) collection[k]=Math.max(collection[k]||0, local.collection[k]);
+  const cards={...(local.cards||{}), ...(cloud.cards||{})};
+  return {decks,collection,cards};
+}
+async function subscribeCloud(uid){
+  const ref=window._db.collection('users').doc(uid);
+  try{
+    const snap=await ref.get();
+    const cloud=snap.exists?snap.data():null;
+    const merged=mergeData(cloud,{decks:state.decks,collection:state.collection,cards:state.cards});
+    window._applyingRemote=true; state.decks=merged.decks; state.collection=merged.collection; state.cards=merged.cards; DB.save(); window._applyingRemote=false;
+    await ref.set({decks:merged.decks,collection:merged.collection,cards:merged.cards,_ts:Date.now()});
+    render();
+  }catch(e){ toast('Sync: '+(e.code||'check Firestore rules')); }
+  window._cloudUnsub=ref.onSnapshot(snap=>{
+    const data=snap.data(); if(!data) return;
+    const incoming=JSON.stringify({d:data.decks||[],c:data.collection||{},k:data.cards||{}});
+    const localStr=JSON.stringify({d:state.decks,c:state.collection,k:state.cards});
+    if(incoming!==localStr){ window._applyingRemote=true; state.decks=data.decks||[]; state.collection=data.collection||{}; state.cards=data.cards||{}; DB.save(); window._applyingRemote=false; render(); }
+  });
+}
+
 // ---------- nav wiring ----------
 document.querySelectorAll('nav button').forEach(b=>{
   b.onclick=()=>setTab(b.dataset.tab);
@@ -1808,11 +1909,14 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,installApp,
+  openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
   setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
+initFirebase();
+updateAccountUI();
 
 // Auto-join a shared life-counter room from a ?room=CODE link.
 (()=>{ const rm=new URLSearchParams(location.search).get('room'); if(rm) joinRoom(rm); })();
