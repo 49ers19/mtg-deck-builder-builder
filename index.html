@@ -1044,14 +1044,43 @@ function gameMove(iid,from,to){
   closeModal(); render();
 }
 function creaturePower(cd){ const p=parseInt(cd&&cd.power,10); return isNaN(p)?0:Math.max(0,p); }
+function numWord(w){ w=(w||'').toLowerCase(); const m={a:1,an:1,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10}; if(m[w]!=null) return m[w]; const n=parseInt(w,10); return isNaN(n)?1:n; }
+function makeToken(name, power, count){
+  for(let i=0;i<(count||1);i++){
+    const tid='tok-'+uid();
+    state.cards[tid]={id:tid,name:name||'Token',mana_cost:'',cmc:0,type_line:'Token Creature',colors:[],img:'',thumb:'',set:'',produced:[],text:'',power:power!=null?String(power):null,ci:[],legal:{}};
+    state.game.battlefield.push({iid:uid(),cardId:tid,tapped:false});
+  }
+}
+// Parse common effect phrases and actually do them. Returns a list of what happened.
+function applyAbilityText(ab, c){
+  const g=state.game, did=[]; let m;
+  // create tokens
+  if((m=ab.match(/create (a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+([^.,;]*?)\s+tokens?/i))){
+    const cnt=numWord(m[1]); let desc=m[2].replace(/\bcopies?\b.*/i,'').replace(/\bthat'?s?\b.*/i,'').replace(/\s+/g,' ').trim();
+    const pt=desc.match(/(\d+)\/(\d+)/); const pw=pt?+pt[1]:0;
+    const name=(desc||'Token').replace(/^(a|an)\s+/i,'');
+    makeToken(name, pw, cnt); did.push('created '+cnt+'× '+name);
+  }
+  // draw cards
+  if((m=ab.match(/\bdraw (a|an|one|two|three|four|five|\d+) cards?/i))){ const cnt=numWord(m[1]); for(let i=0;i<cnt;i++) gameDraw(); did.push('drew '+cnt); }
+  // gain life
+  if((m=ab.match(/gains? (\d+) life/i))){ g.life+=+m[1]; did.push('+'+m[1]+' life'); }
+  // damage / life loss to opponent (training dummy)
+  if((m=ab.match(/deals? (\d+) damage to (?:any target|each opponent|target (?:player|opponent|creature or player|any target))/i)) || (m=ab.match(/(?:each opponent|target (?:player|opponent)) loses (\d+) life/i))){ g.oppLife=Math.max(0,(g.oppLife||0)-(+m[1])); did.push('opponent −'+m[1]); }
+  // +1/+1 counters on this permanent
+  if(c && (m=ab.match(/put (a|an|one|two|three|four|five|\d+) \+1\/\+1 counters? on/i))){ const cnt=numWord(m[1]); c.counters=(c.counters||0)+cnt; did.push('+'+cnt+'/+'+cnt+' counter on this'); }
+  // scry / surveil N  (just note)
+  return did;
+}
 function useAbility(iid, zone, idx){
   const g=state.game, c=g[zone]&&g[zone].find(x=>x.iid===iid); if(!c){ closeModal(); return; }
   const cd=card(c.cardId), lines=((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean);
   const ab=lines[idx]||''; if(!ab){ closeModal(); return; }
-  const trig=/^(When|Whenever|At )/i.test(ab);
   const cost=ab.split(':')[0]||'';
   if(zone==='battlefield' && /\{T\}/.test(cost) && !c.tapped) c.tapped=true; // pay the tap cost
-  toast((trig?'⚡ Triggered: ':'⚡ Used: ')+(ab.length>44?ab.slice(0,44)+'…':ab));
+  const did=applyAbilityText(ab, zone==='battlefield'?c:null);
+  toast(did.length ? '⚡ '+did.join(' · ') : '⚡ '+(ab.length>40?ab.slice(0,40)+'…':ab)+' — do the rest by hand');
   closeModal(); render();
 }
 function gameTap(iid){
@@ -1106,10 +1135,10 @@ function gameCardMenu(iid,zone){
   else if(zone==='command'){ const tax=g.cmdTax||0; acts=[['👑 Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):'')+(tax?' +{'+tax+'}':''),`castCommander('${iid}',false)`]]; }
   const abLines=(cd&&cd.text)?cd.text.split('\n').map(s=>s.trim()).filter(Boolean):[];
   const abilitiesHTML = abLines.length
-    ? `<div class="section-title" style="margin:2px 2px 6px">Abilities <span class="tiny muted" style="text-transform:none;letter-spacing:0">· activated: tap the card on the battlefield</span></div>`+abLines.map((ab)=>{
+    ? `<div class="section-title" style="margin:2px 2px 6px">Abilities <span class="tiny muted" style="text-transform:none;letter-spacing:0">· tap one to apply its effect</span></div>`+abLines.map((ab,i)=>{
         const cls=classifyAbility(ab);
-        const tag=cls==='triggered'?'AUTO · TRIGGER':cls==='static'?'AUTO · PASSIVE':'ACTIVATED';
-        return `<div class="abil-info"><span class="abil-tag">${tag}</span><span>${esc(ab)}</span></div>`;
+        const tag=cls==='triggered'?'TRIGGER':cls==='static'?'PASSIVE':'ACTIVATE';
+        return `<button class="btn full abil" onclick="useAbility('${iid}','${zone}',${i})"><span class="abil-tag tag-use">${tag}</span><span>${esc(ab)}</span></button>`;
       }).join('')
     : '';
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
