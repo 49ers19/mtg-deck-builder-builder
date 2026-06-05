@@ -38,6 +38,7 @@ header{padding:calc(env(safe-area-inset-top) + 14px) 16px 12px;background:linear
 .hdr-actions{position:absolute;top:calc(env(safe-area-inset-top) + 13px);right:12px;display:flex;gap:6px}
 .hdr-btn{background:linear-gradient(180deg,var(--accent2),var(--accent));color:#23200a;border:1px solid var(--accent);border-radius:9px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}
 .hdr-btn.acct{background:var(--panel2);color:var(--text);border-color:var(--line)}
+.hdr-btn.disc{background:#5865F2;color:#fff;border-color:#5865F2;text-decoration:none;display:inline-flex;align-items:center;font-size:14px;padding:7px 9px}
 .filt-bar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .filt{background:var(--bg2);border:1px solid var(--line);border-radius:9px;color:var(--text);font-size:12px;padding:8px 9px;font-family:inherit}
 .filt-q{flex:1 1 130px;min-width:120px}
@@ -249,6 +250,7 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
   <div class="brand"><span class="gem"></span>Grimoire Games</div>
   <div class="sub" id="subtitle">Magic: The Gathering deck builder &amp; collection</div>
   <div class="hdr-actions">
+    <a href="https://discord.gg/EMkDaZKH2" target="_blank" rel="noopener" class="hdr-btn disc" title="Join our Discord">💬</a>
     <button id="acctBtn" class="hdr-btn acct" onclick="openAccount()">👤 Sign in</button>
     <button id="installBtn" class="hdr-btn hidden" onclick="installApp()">⤓ Install</button>
   </div>
