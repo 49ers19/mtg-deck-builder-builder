@@ -1070,7 +1070,12 @@ function applyAbilityText(ab, c){
   if((m=ab.match(/deals? (\d+) damage to (?:any target|each opponent|target (?:player|opponent|creature or player|any target))/i)) || (m=ab.match(/(?:each opponent|target (?:player|opponent)) loses (\d+) life/i))){ g.oppLife=Math.max(0,(g.oppLife||0)-(+m[1])); did.push('opponent −'+m[1]); }
   // +1/+1 counters on this permanent
   if(c && (m=ab.match(/put (a|an|one|two|three|four|five|\d+) \+1\/\+1 counters? on/i))){ const cnt=numWord(m[1]); c.counters=(c.counters||0)+cnt; did.push('+'+cnt+'/+'+cnt+' counter on this'); }
-  // scry / surveil N  (just note)
+  // add mana to the pool (rituals / mana abilities)
+  if((m=ab.match(/\badd ((?:\{[WUBRGCS]\}|\{\d+\}|,| or | and )+)/i))){ const syms=m[1].match(/\{([WUBRGC])\}/gi)||[]; syms.forEach(s=>{ const col=s.replace(/[{}]/g,'').toUpperCase(); if(g.pool[col]!=null) g.pool[col]++; }); if(syms.length) did.push('added '+syms.length+' mana'); }
+  // mill cards
+  if((m=ab.match(/\bmills? (\d+)/i)) || (m=ab.match(/top (\d+) cards?[^.]*?into[^.]*?graveyard/i))){ const n=+m[1]; let k=0; for(let i=0;i<n&&g.library.length;i++){ g.graveyard.push(g.library.shift()); k++; } did.push('milled '+k); }
+  // you lose life
+  if((m=ab.match(/you lose (\d+) life/i))){ g.life-=+m[1]; did.push('−'+m[1]+' life'); }
   return did;
 }
 function useAbility(iid, zone, idx){
