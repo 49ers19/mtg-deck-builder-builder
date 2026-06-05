@@ -1851,18 +1851,21 @@ function showLogin(signup){
     <div style="text-align:center;color:var(--muted);font-size:11px;margin:12px 0">— or with email —</div>
     <div class="field"><label>Email</label><input id="authEmail" class="scan-input" type="email" autocomplete="email"></div>
     <div class="field"><label>Password</label><input id="authPw" class="scan-input" type="password" autocomplete="${signup?'new-password':'current-password'}"></div>
+    <label class="row" style="gap:8px;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="stayLogged" checked style="width:16px;height:16px"><span class="tiny muted">Stay logged in on this device</span></label>
     <button class="btn gold full" onclick="emailAuth(${signup})">${signup?'Create account':'Sign in'}</button>
     <button class="btn ghost full" style="margin-top:8px" onclick="showLogin(${!signup})">${signup?'Have an account? Sign in':'New here? Create an account'}</button>
     <button class="btn ghost full" style="margin-top:4px" onclick="closeModal()">Cancel</button>
   </div></div>`;
   setTimeout(()=>$('#authEmail')?.focus(),50);
 }
-function googleSignIn(){ const p=new firebase.auth.GoogleAuthProvider(); _auth.signInWithPopup(p).then(()=>{ closeModal(); toast('Signed in'); }).catch(e=>toast('Google: '+(e.code||e.message||'').replace('auth/',''))); }
+function applyPersistence(){ const stay=$('#stayLogged')?$('#stayLogged').checked:true; const P=firebase.auth.Auth.Persistence; return _auth.setPersistence(stay?P.LOCAL:P.SESSION).catch(()=>{}); }
+function googleSignIn(){ applyPersistence().then(()=>_auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())).then(()=>{ closeModal(); toast('Signed in'); }).catch(e=>toast('Google: '+(e.code||e.message||'').replace('auth/',''))); }
 function emailAuth(signup){
   const email=($('#authEmail')&&$('#authEmail').value||'').trim(), pw=($('#authPw')&&$('#authPw').value)||'';
   if(!email||!pw){ toast('Enter email and password'); return; }
-  const fn=signup?_auth.createUserWithEmailAndPassword(email,pw):_auth.signInWithEmailAndPassword(email,pw);
-  fn.then(()=>{ closeModal(); toast(signup?'Account created':'Signed in'); }).catch(e=>toast((e.code||e.message||'').replace('auth/','')));
+  applyPersistence().then(()=>signup?_auth.createUserWithEmailAndPassword(email,pw):_auth.signInWithEmailAndPassword(email,pw))
+    .then(()=>{ closeModal(); toast(signup?'Account created':'Signed in'); })
+    .catch(e=>toast((e.code||e.message||'').replace('auth/','')));
 }
 function signOutUser(){ if(_auth) _auth.signOut(); closeModal(); toast('Signed out'); }
 // cloud sync
