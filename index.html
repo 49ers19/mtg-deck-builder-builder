@@ -23,7 +23,16 @@
   --safe-b:env(safe-area-inset-bottom);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;overscroll-behavior:none}
+html,body{height:100%;color:var(--text);font-family:'Inter',system-ui,sans-serif;overscroll-behavior:none;
+  background:
+    radial-gradient(1100px 650px at 50% -8%, rgba(227,193,75,0.10), transparent 60%),
+    radial-gradient(650px 480px at 12% 8%, rgba(47,127,208,0.10), transparent 55%),
+    radial-gradient(650px 480px at 88% 13%, rgba(216,72,58,0.09), transparent 55%),
+    radial-gradient(760px 560px at 8% 96%, rgba(47,160,90,0.09), transparent 58%),
+    radial-gradient(760px 560px at 92% 99%, rgba(120,90,200,0.08), transparent 58%),
+    linear-gradient(180deg,#100e1a, #0a0910 55%, #07070d);
+  background-attachment:fixed;
+}
 body{display:flex;flex-direction:column;max-width:560px;margin:0 auto;position:relative;min-height:100dvh}
 h1,h2,h3,.brand{font-family:'Cinzel',serif}
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
