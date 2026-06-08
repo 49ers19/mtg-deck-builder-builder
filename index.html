@@ -371,7 +371,7 @@ function pips(colors){
 let searchTimer, searchSeq=0;
 async function scrySearch(q){
   const seq = ++searchSeq;
-  if(!q.trim()){ state.searchResults=[]; if(state.tab==='search') render(); return; }
+  if(!q.trim()){ state.searchResults=[]; if(state.tab==='search') renderSearchList(); return; }
   setSearchLoading(true);
   try{
     const query = (state.pickCommanderFor||state.generateMode) ? '('+q+') is:commander' : q;
@@ -380,7 +380,7 @@ async function scrySearch(q){
     if(r.status===404){ state.searchResults=[]; }
     else{ const d = await r.json(); state.searchResults = (d.data||[]).slice(0,40); }
   }catch(e){ state.searchResults=[]; toast('Network error'); }
-  if(seq===searchSeq){ setSearchLoading(false); if(state.tab==='search') render(); }
+  if(seq===searchSeq){ setSearchLoading(false); if(state.tab==='search') renderSearchList(); }
 }
 function setSearchLoading(b){
   const sp = $('#searchSpin'); if(sp) sp.classList.toggle('hidden',!b);
@@ -586,25 +586,30 @@ function renderSearch(){
   const picking = state.pickCommanderFor ? state.decks.find(x=>x.id===state.pickCommanderFor) : null;
   const adding = (!picking && state.addToDeckId) ? state.decks.find(x=>x.id===state.addToDeckId) : null;
   const generating = (!picking && !adding && state.generateMode);
-  let h = '';
-  if(picking){
-    h += `<div class="pick-banner">👑 Choosing commander for <b>${esc(picking.name)}</b><button onclick="cancelPickCommander()">Cancel</button></div>`;
-  }
-  if(adding){
-    h += `<div class="pick-banner">🗂️ Adding to <b>${esc(adding.name)}</b><button onclick="finishAdding()">Done</button></div>`;
-  }
-  if(generating){
-    h += `<div class="pick-banner">✨ Pick a commander to auto-build a deck<button onclick="cancelGenerate()">Cancel</button></div>`;
-  }
-  h += `<div class="search-wrap">
+  let top = '';
+  if(picking) top += `<div class="pick-banner">👑 Choosing commander for <b>${esc(picking.name)}</b><button onclick="cancelPickCommander()">Cancel</button></div>`;
+  if(adding) top += `<div class="pick-banner">🗂️ Adding to <b>${esc(adding.name)}</b><button onclick="finishAdding()">Done</button></div>`;
+  if(generating) top += `<div class="pick-banner">✨ Pick a commander to auto-build a deck<button onclick="cancelGenerate()">Cancel</button></div>`;
+  top += `<div class="search-wrap">
       <input id="searchInput" placeholder="${(picking||generating)?'Search for a commander…':adding?'Search cards to add…':'Search cards, e.g. lightning bolt'}" value="${esc(state.searchQuery)}" autocomplete="off">
       <div id="searchSpin" class="spin hidden"></div>
     </div>`;
+  main.innerHTML = top + `<div id="searchList"></div>`;
+  const inp = $('#searchInput');
+  if(inp){ inp.oninput = e=>{ state.searchQuery = e.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(()=>scrySearch(e.target.value), 320); }; }
+  renderSearchList();
+}
+// Updates ONLY the results list, leaving the input untouched (so typing isn't interrupted).
+function renderSearchList(){
+  const el = $('#searchList'); if(!el) return;
+  const picking = state.pickCommanderFor ? state.decks.find(x=>x.id===state.pickCommanderFor) : null;
+  const adding = (!picking && state.addToDeckId) ? state.decks.find(x=>x.id===state.addToDeckId) : null;
+  const generating = (!picking && !adding && state.generateMode);
+  let h = '';
   if(!state.searchQuery.trim()){
-    h += picking
-      ? `<div class="empty"><div class="big">👑</div><div class="t">Find your commander</div><div class="tiny">Search a legendary creature's name — only cards that can be commanders will show.</div></div>`
-      : `<div class="empty"><div class="big">🔍</div><div class="t">Search Scryfall</div>
-      <div class="tiny">Try a name, or <b>t:dragon</b>, <b>c:rg</b>, <b>cmc=3</b>.<br>Powered by the Scryfall API.</div></div>`;
+    h += picking ? `<div class="empty"><div class="big">👑</div><div class="t">Find your commander</div><div class="tiny">Search a legendary creature's name — only cards that can be commanders will show.</div></div>`
+      : generating ? `<div class="empty"><div class="big">✨</div><div class="t">Pick a commander</div><div class="tiny">Search a legendary creature to auto-build a deck around it.</div></div>`
+      : `<div class="empty"><div class="big">🔍</div><div class="t">Search Scryfall</div><div class="tiny">Try a name, or <b>t:dragon</b>, <b>c:rg</b>, <b>cmc=3</b>.<br>Powered by the Scryfall API.</div></div>`;
   } else if(!state.searchResults.length){
     h += `<div class="empty"><div class="big">🤔</div><div class="t">No results</div><div class="tiny">Check spelling or try a broader query.</div></div>`;
   } else {
@@ -623,17 +628,8 @@ function renderSearch(){
       </div>`;
     });
   }
-  main.innerHTML = h;
-  const inp = $('#searchInput');
-  if(inp){
-    inp.oninput = e=>{
-      state.searchQuery = e.target.value;
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(()=>scrySearch(e.target.value), 280);
-    };
-    // cache the result objects so addMenu/showCardObj can find them
-    state._resultMap = {}; state.searchResults.forEach(c=>state._resultMap[c.id]=c);
-  }
+  el.innerHTML = h;
+  state._resultMap = {}; state.searchResults.forEach(c=>state._resultMap[c.id]=c);
 }
 
 // ---------- COLLECTION ----------
