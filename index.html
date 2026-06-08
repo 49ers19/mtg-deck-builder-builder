@@ -1748,19 +1748,43 @@ function deleteDeck(id){
 }
 
 // ---------- Card preview ----------
-function showCard(id){ const c=card(id); if(c) cardPreview(c.img||c.thumb, c.name); }
+function showCard(id){ const c=card(id); if(c) openCardModal(id, c.name, c.img||c.thumb); }
 function showCardObj(id){
-  const c=state._resultMap&&state._resultMap[id]; if(!c) return;
+  const c=state._resultMap&&state._resultMap[id]; if(!c) return; cacheCard(c);
   const img=(c.image_uris&&c.image_uris.normal)||(c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.normal)||'';
-  cardPreview(img,c.name);
+  openCardModal(c.id, c.name, img);
 }
-function cardPreview(img,name){
-  if(!img){ toast('No image available'); return; }
-  modalRoot.innerHTML = `<div class="modal-bg" onclick="closeModal()" style="align-items:center">
-    <div style="text-align:center;padding:20px">
-      <img src="${img}" alt="${esc(name)}" style="max-width:88vw;max-height:74vh;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.6)">
-      <div class="tiny muted" style="margin-top:12px">Tap anywhere to close</div>
-    </div></div>`;
+function bigImg(p){ return (p.image_uris&&p.image_uris.normal)||(p.card_faces&&p.card_faces[0].image_uris&&p.card_faces[0].image_uris.normal)||''; }
+function openCardModal(id, name, img){
+  state._cardView={id, name}; state._variantMap={};
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-height:90vh;overflow-y:auto">
+    <img id="cardViewImg" src="${img||''}" alt="${esc(name)}" style="width:64%;max-width:250px;border-radius:12px;display:block;margin:0 auto 10px;box-shadow:0 8px 30px rgba(0,0,0,.5)">
+    <div style="text-align:center;font-weight:700;font-size:15px;margin-bottom:12px">${esc(name)}</div>
+    <div class="row" style="gap:8px;margin-bottom:6px"><button class="btn gold full" onclick="cardViewAdd('collection')">📚 Collection</button><button class="btn full" onclick="cardViewAdd('wishlist')">⭐ Wishlist</button></div>
+    <div class="section-title" style="margin:10px 2px 6px">Art variants</div>
+    <div id="variantStrip" class="zone-cards"><div class="tiny muted" style="padding:4px">Loading printings…</div></div>
+    <button class="btn ghost full" style="margin-top:12px" onclick="closeModal()">Close</button>
+  </div></div>`;
+  loadVariants(name);
+}
+async function loadVariants(name){
+  const el=()=>$('#variantStrip');
+  try{
+    const r=await fetch('https://api.scryfall.com/cards/search?unique=prints&order=released&q='+encodeURIComponent('!"'+name+'"'));
+    if(!r.ok){ if(el()) el().innerHTML='<div class="tiny muted" style="padding:4px">Only one printing.</div>'; return; }
+    const prints=(await r.json()).data||[];
+    prints.forEach(p=>state._variantMap[p.id]=p);
+    if(!el()) return;
+    if(prints.length<=1){ el().innerHTML='<div class="tiny muted" style="padding:4px">Only one printing.</div>'; return; }
+    el().innerHTML=prints.map(p=>{ const th=(p.image_uris&&p.image_uris.small)||(p.card_faces&&p.card_faces[0].image_uris&&p.card_faces[0].image_uris.small)||''; const sel=p.id===state._cardView.id?' style="outline:2px solid var(--accent2)"':''; return `<div class="gcard" title="${esc(p.set_name||'')}"${sel} style="background-image:url('${th}')" onclick="pickVariant('${p.id}')"></div>`; }).join('');
+  }catch(e){ if(el()) el().innerHTML='<div class="tiny muted" style="padding:4px">Couldn’t load printings.</div>'; }
+}
+function pickVariant(id){ const p=state._variantMap[id]; if(!p) return; state._cardView.id=id; const im=$('#cardViewImg'); if(im) im.src=bigImg(p); [...document.querySelectorAll('#variantStrip .gcard')].forEach(g=>g.style.outline=''); const sel=document.querySelector(`#variantStrip .gcard[onclick*="${id}"]`); if(sel) sel.style.outline='2px solid var(--accent2)'; }
+function cardViewAdd(where){
+  const id=state._cardView.id; const p=state._variantMap[id]; if(p) cacheCard(p);
+  if(where==='wishlist'){ state.wishlist[id]=1; toast('Added to wishlist'); }
+  else { state.collection[id]=(state.collection[id]||0)+1; toast((state.collection[id])+'× to collection'); }
+  DB.save();
 }
 function closeModal(){ modalRoot.innerHTML=''; }
 
@@ -2042,7 +2066,7 @@ document.querySelectorAll('nav button').forEach(b=>{
 
 // expose for inline handlers
 Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQty,collQty,
-  addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,
+  addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,pickVariant,cardViewAdd,
   setCollMode,addToWishlist,removeWishlist,
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,scanAdd,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
