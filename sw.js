@@ -1,5 +1,5 @@
 // Grimoire Games service worker — caches the app shell so it works offline once installed.
-const CACHE = 'grimoire-v9';
+const CACHE = 'grimoire-v10';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './precons.json',
   './icon-192.png', './icon-512.png', './apple-touch-icon.png'

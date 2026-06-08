@@ -1311,9 +1311,9 @@ function useAbility(iid, zone, idx){
     state.targeting={...tgt, srcName:cd?cd.name:'', srcIid:iid};
     closeModal(); render(); toast(pool.length?'Choose a target — tap a highlighted card':'No creatures — tap 🎯 Opponent'); return;
   }
-  // Non-target effects need no decision — just remind the player; they resolve it with the existing controls.
-  const effect=(ab.includes(':')?ab.split(':').slice(1).join(':'):ab).trim();
-  toast('📋 '+(effect.length>70?effect.slice(0,70)+'…':effect)+' — do this by hand');
+  // Non-target effects need no decision — resolve them automatically.
+  const did=applyAbilityText(ab, zone==='battlefield'?c:null);
+  toast(did.length ? '⚡ '+did.join(' · ') : '⚡ '+(ab.length>40?ab.slice(0,40)+'…':ab)+' — do the rest by hand');
   closeModal(); render();
 }
 function gameTap(iid){
@@ -1367,7 +1367,7 @@ function gameCardMenu(iid,zone){
   else if(zone==='command'){ const tax=g.cmdTax||0; acts=[['👑 Cast'+(cd&&cd.mana_cost?' · '+manaText(cd.mana_cost):'')+(tax?' +{'+tax+'}':''),`castCommander('${iid}',false)`]]; }
   const abLines=(cd&&cd.text)?cd.text.split('\n').map(s=>s.trim()).filter(Boolean):[];
   const abilitiesHTML = abLines.length
-    ? `<div class="section-title" style="margin:2px 2px 6px">Abilities <span class="tiny muted" style="text-transform:none;letter-spacing:0">· targeted ones let you pick & auto-resolve; the rest are reminders to do by hand</span></div>`+abLines.map((ab,i)=>{
+    ? `<div class="section-title" style="margin:2px 2px 6px">Abilities <span class="tiny muted" style="text-transform:none;letter-spacing:0">· tap one — no-choice effects resolve automatically, targeted ones let you pick</span></div>`+abLines.map((ab,i)=>{
         const cls=classifyAbility(ab);
         const tag=cls==='triggered'?'TRIGGER':cls==='static'?'PASSIVE':'ACTIVATE';
         return `<button class="btn full abil" onclick="useAbility('${iid}','${zone}',${i})"><span class="abil-tag tag-use">${tag}</span><span>${esc(ab)}</span></button>`;
