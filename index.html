@@ -753,26 +753,50 @@ async function fetchRecs(deck){
 }
 function startGenerate(){ state.generateMode=true; state.tab='search'; state.searchQuery=''; state.searchResults=[]; render(); setTimeout(()=>$('#searchInput')?.focus(),60); }
 function cancelGenerate(){ state.generateMode=false; state.tab='decks'; render(); }
-function generateFromResult(cardId){ const c=state._resultMap&&state._resultMap[cardId]; if(c){ state.generateMode=false; generateDeck(c); } }
-async function generateDeck(cmd){
-  if(!cmd) return; cacheCard(cmd);
+function generateFromResult(cardId){ const c=state._resultMap&&state._resultMap[cardId]; if(c){ state._genCmd=c; state.generateMode=false; chooseGenSource(); } }
+function chooseGenSource(){
+  const c=state._genCmd; if(!c) return;
+  const owned=Object.keys(state.collection).filter(id=>state.collection[id]>0).length;
+  const wish=Object.keys(state.wishlist).filter(id=>state.wishlist[id]).length;
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>Build ${esc(c.name)}</h3>
+    <div class="tiny muted" style="margin-bottom:12px">Which cards can the builder use? (basic lands always added)</div>
+    <button class="btn gold full" onclick="runGen('any')">🌐 Anything — best cards (EDHREC)</button>
+    <button class="btn full" style="margin-top:8px" onclick="runGen('owned')">📚 Only cards I own (${owned})</button>
+    <button class="btn full" style="margin-top:8px" onclick="runGen('ownedwish')">⭐ Owned + wishlist (${owned+wish})</button>
+    <button class="btn ghost full" style="margin-top:8px" onclick="closeModal()">Cancel</button>
+  </div></div>`;
+}
+function runGen(source){ closeModal(); const c=state._genCmd; if(c) generateDeck(c, source); }
+async function generateDeck(cmd, source){
+  if(!cmd) return; source=source||'any'; cacheCard(cmd);
   toast('Generating a deck for '+cmd.name+'…');
-  const ci=cmd.color_identity||[];
-  let names=[];
+  const ci=cmd.color_identity||cmd.ci||[];
+  const cmdName=cmd.name.toLowerCase();
+  let recNames=[];
   try{
     const r=await fetch('https://json.edhrec.com/pages/commanders/'+slugify(cmd.name)+'.json');
     if(r.ok){ const d=await r.json(); const cls=((d.container&&d.container.json_dict&&d.container.json_dict.cardlists)||d.cardlists||[]).slice();
       const pri=hd=>{hd=(hd||'').toLowerCase(); if(hd.includes('top cards'))return 0; if(hd.includes('high synergy')||hd.includes('signature'))return 1; if(hd.includes('new'))return 9; return 5;};
       cls.sort((a,b)=>pri(a.header)-pri(b.header));
-      cls.forEach(cl=>(cl.cardviews||cl.cardlist||[]).forEach(cv=>cv&&cv.name&&names.push(cv.name)));
+      cls.forEach(cl=>(cl.cardviews||cl.cardlist||[]).forEach(cv=>cv&&cv.name&&recNames.push(cv.name)));
     }
   }catch(e){}
-  const cmdName=cmd.name.toLowerCase(); const seen=new Set([cmdName]);
-  names=names.filter(n=>{const k=n.toLowerCase(); if(seen.has(k))return false; seen.add(k); return true;});
-  if(!names.length) names=await scryfallFallbackRecs(cmd, new Set([cmdName]));
-  const {found}=await scryCollection(names.slice(0,150));
+  let pool=[];
+  if(source==='any'){
+    let names=recNames; const seen=new Set([cmdName]); names=names.filter(n=>{const k=n.toLowerCase(); if(seen.has(k))return false; seen.add(k); return true;});
+    if(!names.length) names=await scryfallFallbackRecs(cmd, new Set([cmdName]));
+    pool=(await scryCollection(names.slice(0,150))).found;
+  } else {
+    const ids=new Set(Object.keys(state.collection).filter(id=>state.collection[id]>0));
+    if(source==='ownedwish') Object.keys(state.wishlist).forEach(id=>{ if(state.wishlist[id]) ids.add(id); });
+    pool=[...ids].map(id=>card(id)).filter(Boolean);
+    const rank={}; recNames.forEach((n,i)=>{ const k=n.toLowerCase(); if(rank[k]==null) rank[k]=i; });
+    pool.sort((a,b)=>((rank[a.name.toLowerCase()]==null?9999:rank[a.name.toLowerCase()]) - (rank[b.name.toLowerCase()]==null?9999:rank[b.name.toLowerCase()])));
+  }
+  const ciOf=c=>c.color_identity||c.ci||[];
   const isLand=c=>/\bLand\b/.test(c.type_line||'');
-  const within=found.filter(c=>(c.color_identity||[]).every(x=>ci.includes(x)) && c.name.toLowerCase()!==cmdName && !/^Basic/.test(c.type_line||''));
+  const within=pool.filter(c=>c && c.name.toLowerCase()!==cmdName && ciOf(c).every(x=>ci.includes(x)) && !/^Basic/.test(c.type_line||''));
   const spells=within.filter(c=>!isLand(c)), lands=within.filter(isLand);
   const chosen=[...spells.slice(0,63), ...lands.slice(0,36)].slice(0,99);
   const id=uid(); const deck={id,name:cmd.name+' (auto)',format:'Commander',commander:cmd.id,cards:{}};
@@ -2054,7 +2078,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,installApp,
-  startGenerate,cancelGenerate,generateFromResult,
+  startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
   setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,
