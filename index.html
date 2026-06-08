@@ -1356,8 +1356,7 @@ function gameCardMenu(iid,zone){
     if(!c.tapped) acts.push(['⟳ Tap…',`tapCard('${iid}')`]);
     else if(hasUntapEnabler()) acts.push(['↺ Untap (you control an untap ability)',`gameTap('${iid}')`]);
     else acts.push(['🔒 Stays tapped — no untap card in play',`gameUntapInfo()`]);
-    acts.push(['➕ Add +1/+1 counter',`addCounter('${iid}',1)`]);
-    if((c.counters||0)>0) acts.push(['➖ Remove counter ('+(c.counters||0)+')',`addCounter('${iid}',-1)`]);
+    if((c.counters||0)>0) acts.push(['➖ Remove +1/+1 counter ('+(c.counters||0)+')',`addCounter('${iid}',-1)`]);
     acts.push(['⚰ To graveyard',`gameMove('${iid}','battlefield','graveyard')`]);
     if(hasReturnEnabler()) acts.push(['↩ Return to hand (you control a return ability)',`gameMove('${iid}','battlefield','hand')`]);
     acts.push(['✦ Exile',`gameMove('${iid}','battlefield','exile')`]);
