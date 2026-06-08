@@ -1165,6 +1165,11 @@ function gameMove(iid,from,to){
     }
   }
   const c=arr.splice(idx,1)[0];
+  // leaving the battlefield wipes all in-play state (damage, counters, temp buffs)
+  if(from==='battlefield'){ delete c.damage; delete c.tempPump; delete c.tempMinus; }
+  // tokens cease to exist the moment they leave the battlefield (state-based action)
+  const cd0=card(c.cardId);
+  if(from==='battlefield' && to!=='battlefield' && cd0 && /token/i.test(cd0.type_line||'')){ toast((cd0.name||'Token')+' (token) ceased to exist'); closeModal(); render(); return; }
   if(to==='battlefield'){ c.tapped=false; g.battlefield.push(c); }
   else if(to==='libraryTop'){ delete c.tapped; delete c.counters; g.library.unshift(c); }
   else if(to==='libraryBottom'){ delete c.tapped; delete c.counters; g.library.push(c); }
@@ -1233,6 +1238,14 @@ function applyAbilityText(ab, c){
   if((m=ab.match(/\bsurveil (\d+)/i))){ did.push('surveil '+m[1]+' (top '+m[1]+' — keep or mill by hand)'); }
   // tutor — search your library (note + shuffle reminder)
   if(/search your library for/i.test(ab)){ did.push('search your library (grab the card by hand, then shuffle)'); }
+  // wheel — discard your hand, then draw N
+  if((m=ab.match(/discard(?:s)? (?:your |their )?hand,? (?:and|then) draws? (a|an|one|two|three|four|five|six|seven|\d+)/i))){ const n=numWord(m[1]); while(g.hand.length){ g.graveyard.push(g.hand.shift()); } for(let i=0;i<n;i++) gameDraw(); did.push('discarded hand, drew '+n); }
+  // each player draws a card (you draw too)
+  else if((m=ab.match(/each player draws? (a|an|one|two|three|\d+) cards?/i))){ const n=numWord(m[1]); for(let i=0;i<n;i++) gameDraw(); did.push('you drew '+n+' (each opponent draws too)'); }
+  // sacrifice a permanent (cost/effect — pick it by hand)
+  if(/\bsacrifices? (a|an|another|each|two|three|\d+)/i.test(ab) && !/target/i.test(ab)){ did.push('sacrifice — send a permanent to the graveyard by hand'); }
+  // create a copy / populate (note)
+  if(/\bpopulate\b/i.test(ab)){ did.push('populate (copy a token you control — use 🎲 Token)'); }
   // monarch / goad / venture — flavor notes
   if(/you become the monarch/i.test(ab)){ did.push('you are the monarch'); }
   if(/\bgoad\b/i.test(ab)){ did.push('goaded (note)'); }
@@ -1245,6 +1258,7 @@ function targetedEffect(ab){
   let m;
   if((m=ab.match(/destroy target ([a-z ]+?)(?:\.|,|;| with | that | you | an | unless |$)/i))) return {kind:'destroy', filter:normFilter(m[1])};
   if((m=ab.match(/exile target ([a-z ]+?)(?:\.|,|;| that | you | an | unless |$)/i))) return {kind:'exile', filter:normFilter(m[1])};
+  if((m=ab.match(/return target ([a-z ]+?) card from your graveyard to (?:the |your )?(battlefield|hand)/i))) return {kind:(m[2].toLowerCase()==='battlefield'?'reanimate':'regrowth'), filter:normFilter(m[1]), zone:'graveyard'};
   if((m=ab.match(/return target ([a-z ]+?) to (?:its owner'?s|your|their) hand/i))) return {kind:'bounce', filter:normFilter(m[1])};
   if((m=ab.match(/put (a|an|one|two|three|four|five|\d+) \+1\/\+1 counters? on target ([a-z ]+)/i))) return {kind:'counter', n:numWord(m[1]), filter:normFilter(m[2])};
   if((m=ab.match(/put (a|an|one|two|three|four|five|\d+) -1\/-1 counters? on target ([a-z ]+)/i))) return {kind:'minus', n:numWord(m[1]), filter:normFilter(m[2])};
@@ -1252,19 +1266,25 @@ function targetedEffect(ab){
   if((m=ab.match(/target ([a-z ]+?) gets \+(\d+)\/\+(\d+)/i))) return {kind:'pump', filter:normFilter(m[1]), p:+m[2], t:+m[3]};
   if((m=ab.match(/\btap target ([a-z ]+)/i))) return {kind:'tap', filter:normFilter(m[1])};
   if((m=ab.match(/\buntap target ([a-z ]+)/i))) return {kind:'untap', filter:normFilter(m[1])};
+  if(/\bfights? (?:another )?target creature/i.test(ab)) return {kind:'fight', filter:'creature'};
   if((m=ab.match(/deals? (\d+) damage to target ([a-z ]+)/i))) return {kind:'damage', n:+m[1], filter:normFilter(m[2])};
   if((m=ab.match(/deals? (\d+) damage to any target/i))) return {kind:'damage', n:+m[1], filter:'any', canFace:true};
   return null;
 }
 function cancelTarget(){ state.targeting=null; render(); }
 function applyTargetOpponent(){ const t=state.targeting; if(!t) return; state.targeting=null; if(t.kind==='damage'){ oppDamage(t.n); } else render(); }
+function lethalDamage(c,cd){ const bt=parseInt(cd.toughness,10); return /creature/.test((cd.type_line||'').toLowerCase())&&!isNaN(bt)&&((c.damage||0)>=bt+(c.counters||0)-(c.tempMinus||0)+(c.tempPump||0)); }
 function applyTargetTo(iid){
-  const t=state.targeting; if(!t) return; const g=state.game; const c=g.battlefield.find(x=>x.iid===iid); if(!c) return;
+  const t=state.targeting; if(!t) return; const g=state.game; const tz=t.zone||'battlefield';
+  const c=(g[tz]||[]).find(x=>x.iid===iid); if(!c) return;
   const cd=card(c.cardId);
   if(!matchesFilter(cd, t.filter)){ toast('Not a legal target'); return; }
   state.targeting=null;
   const isCreature=/creature/.test((cd.type_line||'').toLowerCase());
   const baseTough=parseInt(cd.toughness,10);
+  if(t.kind==='reanimate'){ toast('Returned '+cd.name+' to the battlefield'); gameMove(iid,'graveyard','battlefield'); return; }
+  if(t.kind==='regrowth'){ toast('Returned '+cd.name+' to hand'); gameMove(iid,'graveyard','hand'); return; }
+  if(t.kind==='fight'){ const src=g.battlefield.find(x=>x.iid===t.srcIid); if(!src){ toast('Source gone — fight fizzled'); render(); return; } const srcCd=card(src.cardId); const srcPow=creaturePower(srcCd), tgtPow=creaturePower(cd); c.damage=(c.damage||0)+srcPow; src.damage=(src.damage||0)+tgtPow; let msg=cd.name+' ⚔ '+srcCd.name+': '; const dead=[]; if(lethalDamage(c,cd)) dead.push([c.iid,cd.name]); if(lethalDamage(src,srcCd)) dead.push([src.iid,srcCd.name]); dead.forEach(d=>gameMove(d[0],'battlefield','graveyard')); toast(msg+(dead.length?dead.map(d=>d[1]+' died').join(', '):'both survived')); if(!dead.length) render(); return; }
   if(t.kind==='destroy'){ toast('Destroyed '+cd.name); gameMove(iid,'battlefield','graveyard'); }
   else if(t.kind==='exile'){ toast('Exiled '+cd.name); gameMove(iid,'battlefield','exile'); }
   else if(t.kind==='bounce'){ toast('Returned '+cd.name+' to hand'); gameMove(iid,'battlefield','hand'); }
@@ -1283,7 +1303,14 @@ function useAbility(iid, zone, idx){
   const cost=ab.split(':')[0]||'';
   if(zone==='battlefield' && /\{T\}/.test(cost) && !c.tapped) c.tapped=true; // pay the tap cost
   const tgt=targetedEffect(ab);
-  if(tgt){ state.targeting={...tgt, srcName:cd?cd.name:''}; closeModal(); render(); toast('Choose a target — tap a highlighted card'); return; }
+  if(tgt){
+    const tz=tgt.zone||'battlefield';
+    let pool=(g[tz]||[]).filter(x=>matchesFilter(card(x.cardId),tgt.filter));
+    if(tgt.kind==='fight') pool=pool.filter(x=>x.iid!==iid); // can't fight itself
+    if(!pool.length && !tgt.canFace){ closeModal(); render(); toast('No legal target'+(tz==='graveyard'?' in graveyard':' on the battlefield')+' for '+(cd?cd.name:'this')); return; }
+    state.targeting={...tgt, srcName:cd?cd.name:'', srcIid:iid};
+    closeModal(); render(); toast(pool.length?'Choose a target — tap a highlighted card':'No creatures — tap 🎯 Opponent'); return;
+  }
   const did=applyAbilityText(ab, zone==='battlefield'?c:null);
   toast(did.length ? '⚡ '+did.join(' · ') : '⚡ '+(ab.length>40?ab.slice(0,40)+'…':ab)+' — do the rest by hand');
   closeModal(); render();
@@ -1312,7 +1339,7 @@ function castCommander(iid, ignoreMana){
   gameMove(iid,'command','battlefield');
 }
 function gameCardMenu(iid,zone){
-  if(state.targeting && zone==='battlefield'){ applyTargetTo(iid); return; }
+  if(state.targeting && zone===(state.targeting.zone||'battlefield')){ applyTargetTo(iid); return; }
   const g=state.game, c=g[zone].find(x=>x.iid===iid); if(!c) return;
   const cd=card(c.cardId), img=cd?(cd.img||cd.thumb):'';
   const isLand = cd && /\bLand\b/.test(cd.type_line||'');
@@ -1364,7 +1391,7 @@ function gameCardHTML(c,zone){
     if(netP!==0||netT!==0){ const sign=v=>(v>=0?'+'+v:''+v); badges+=`<span class="gcard-ctr">${sign(netP)}/${sign(netT)}</span>`; }
     if(c.damage>0){ badges+=`<span class="gcard-dmg">${c.damage}🩸</span>`; }
   }
-  const tgtOk=(zone==='battlefield'&&state.targeting&&matchesFilter(cd,state.targeting.filter));
+  const tgtOk=(state.targeting&&zone===(state.targeting.zone||'battlefield')&&matchesFilter(cd,state.targeting.filter)&&!(state.targeting.kind==='fight'&&c.iid===state.targeting.srcIid));
   return `<div class="gcard${c.tapped?' tapped':''}${thumb?'':' noimg'}${tgtOk?' target-ok':''}" style="background-image:url('${thumb}')" onclick="gameCardMenu('${c.iid}','${zone}')">${thumb?'':`<span class="gcard-lbl">${esc(cd?cd.name:'?')}</span>`}${badges}</div>`;
 }
 function createToken(){
@@ -1382,7 +1409,7 @@ function renderGame(){
   const cmdCI=(cmdCard&&((cmdCard.ci&&cmdCard.ci.length)?cmdCard.ci:cmdCard.colors))||[];
   const showColors=cmdCI.length?[...['W','U','B','R','G'].filter(m=>cmdCI.includes(m)),'C']:MANA_COLORS;
   let tb='';
-  if(state.targeting){ const t=state.targeting; const f=(t.filter&&t.filter!=='permanent'&&t.filter!=='any')?' ('+t.filter+')':''; tb=`<div class="pick-banner">🎯 Choose a target${f} for ${esc(t.srcName||'the ability')}${t.canFace?` <button onclick="applyTargetOpponent()">🎯 Opponent</button>`:''}<button onclick="cancelTarget()">Cancel</button></div>`; }
+  if(state.targeting){ const t=state.targeting; const f=(t.filter&&t.filter!=='permanent'&&t.filter!=='any')?' '+t.filter:''; const zw=(t.zone==='graveyard')?' in graveyard':''; tb=`<div class="pick-banner">🎯 ${esc(t.srcName||'Ability')} — tap a highlighted${f} card${zw}${t.canFace?` <button onclick="applyTargetOpponent()">🎯 Opponent</button>`:''}<button onclick="cancelTarget()">Cancel</button></div>`; }
   let h=tb+`<div class="game-top">
       <button class="back" onclick="exitGame()">‹</button>
       <div class="ttl">${esc(g.deckName)}</div>
@@ -2163,7 +2190,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,cancelTarget,applyTargetOpponent,applyTargetTo,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,cancelTarget,applyTargetOpponent,applyTargetTo,lethalDamage,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
