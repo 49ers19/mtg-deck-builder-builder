@@ -231,6 +231,8 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .gcard-ctr{position:absolute;bottom:2px;right:2px;background:var(--ok);color:#0d0f1a;font-size:8px;font-weight:800;padding:1px 3px;border-radius:4px;line-height:1.1}
 .gcard:active{transform:scale(1.05)}
 .gcard.tapped{opacity:.45;filter:grayscale(.6);transform:rotate(10deg)}
+.gcard.target-ok{outline:2px solid var(--accent2);box-shadow:0 0 10px rgba(227,193,75,.6);cursor:pointer;animation:tgtpulse 1s ease-in-out infinite}
+@keyframes tgtpulse{0%,100%{box-shadow:0 0 6px rgba(227,193,75,.5)}50%{box-shadow:0 0 16px rgba(227,193,75,.95)}}
 .gcard.noimg{display:flex;align-items:center;justify-content:center;padding:3px;background:var(--panel2)}
 .gcard-lbl{font-size:8px;line-height:1.1;font-weight:700;color:var(--text);text-align:center;overflow:hidden}
 .card-text{font-size:12px;line-height:1.5;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:14px;max-height:170px;overflow-y:auto;white-space:pre-wrap}
@@ -322,6 +324,7 @@ const state = {
   searchQuery: '',
   play: { count:2, start:40, life:[40,40], poison:[0,0], cmd:[[0,0],[0,0]], mode:'life' },
   game: null,
+  targeting: null,
   session: null,
   collFilter: { q:'', type:'', color:'', cmc:'', rarity:'' },
   analyzeDeckId: null,
@@ -344,6 +347,7 @@ function cacheCard(c){
       text: oracleText(c),
       ci: c.color_identity||[],
       power: (c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null,
+      toughness: (c.toughness!=null?c.toughness:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].toughness))||null,
       legal: c.legalities||{},
       tcg: (c.purchase_uris&&c.purchase_uris.tcgplayer)||null,
     };
@@ -1007,7 +1011,7 @@ async function enrichGameCards(ids){
     try{
       const r=await fetch('https://api.scryfall.com/cards/collection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifiers:chunk.map(id=>({id}))})});
       const d=await r.json();
-      (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); e.power=(c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null; e.legal=c.legalities||e.legal||{}; } });
+      (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); e.power=(c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null; e.toughness=(c.toughness!=null?c.toughness:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].toughness))||null; e.legal=c.legalities||e.legal||{}; } });
     }catch(e){}
   }
   DB.save(); render();
@@ -1051,12 +1055,12 @@ function gameDrawBtn(){ if(!hasDrawEnabler()){ toast('You only draw on your draw
 const PHASES=['Untap','Upkeep','Draw','Main 1','Combat','End'];
 const MANA_COLORS=['W','U','B','R','G','C'];
 function emptyPool(){ return {W:0,U:0,B:0,R:0,G:0,C:0}; }
-function gameNextTurn(){ const g=state.game; g.turn++; g.phase=3; g.battlefield.forEach(c=>c.tapped=false); g.landsThisTurn=0; g.pool=emptyPool(); const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
+function gameNextTurn(){ const g=state.game; g.turn++; g.phase=3; g.battlefield.forEach(c=>{c.tapped=false;delete c.damage;}); g.landsThisTurn=0; g.pool=emptyPool(); const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
 function gameNextPhase(){
   const g=state.game; let p=(g.phase==null?3:g.phase)+1;
   if(p>=PHASES.length){ p=0; g.turn++; }
   g.phase=p;
-  if(PHASES[p]==='Untap'){ g.battlefield.forEach(c=>c.tapped=false); g.landsThisTurn=0; g.pool=emptyPool(); toast('Turn '+g.turn+' · untap — mana refreshed'); }
+  if(PHASES[p]==='Untap'){ g.battlefield.forEach(c=>{c.tapped=false;delete c.damage;}); g.landsThisTurn=0; g.pool=emptyPool(); toast('Turn '+g.turn+' · untap — mana refreshed'); }
   else if(PHASES[p]==='Draw'){ const d=gameDraw(); toast(d?'Draw step · drew a card':'Draw step · library empty!'); }
   else toast(PHASES[p]);
   render();
@@ -1097,7 +1101,7 @@ function tapDo(iid, kind, idx){
   if(kind==='mana'){ tapForMana(iid); return; }
   c.tapped=true;
   if(kind==='attack'){ const pw=creaturePower(card(c.cardId))+(c.counters||0); g.oppLife=(g.oppLife||0)-pw; if(g.oppLife<=0){ g.oppLife=0; toast('🏆 Hit for '+pw+' — opponent defeated!'); } else toast('⚔️ Attacked for '+pw); }
-  else if(kind==='ab'){ const cd=card(c.cardId); const ab=(((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean))[idx]||''; if(/draw [^.]{0,18}card/i.test(ab)){ gameDraw(); toast('⚡ '+(ab.length>34?ab.slice(0,34)+'…':ab)+' — drew'); } else toast('⚡ Used: '+(ab.length>44?ab.slice(0,44)+'…':ab)); }
+  else if(kind==='ab'){ useAbility(iid,'battlefield',idx); return; }
   else toast('Tapped');
   closeModal(); render();
 }
@@ -1209,12 +1213,39 @@ function applyAbilityText(ab, c){
   if(/\bproliferate\b/i.test(ab)){ did.push('proliferate (add a counter to each chosen permanent)'); }
   return did;
 }
+function normFilter(s){ s=(s||'').toLowerCase(); if(/creature/.test(s))return 'creature'; if(/artifact/.test(s))return 'artifact'; if(/enchantment/.test(s))return 'enchantment'; if(/planeswalker/.test(s))return 'planeswalker'; if(/nonland/.test(s))return 'nonland'; if(/\bland\b/.test(s))return 'land'; return 'permanent'; }
+function matchesFilter(cd, filter){ const tl=(cd&&cd.type_line||'').toLowerCase(); if(filter==='any'||filter==='permanent') return true; if(filter==='nonland') return !/\bland\b/.test(tl); return tl.includes(filter); }
+function targetedEffect(ab){
+  let m;
+  if((m=ab.match(/destroy target ([a-z ]+?)(?:\.|,|;| with | that | you | an | unless |$)/i))) return {kind:'destroy', filter:normFilter(m[1])};
+  if((m=ab.match(/exile target ([a-z ]+?)(?:\.|,|;| that | you | an | unless |$)/i))) return {kind:'exile', filter:normFilter(m[1])};
+  if((m=ab.match(/return target ([a-z ]+?) to (?:its owner'?s|your|their) hand/i))) return {kind:'bounce', filter:normFilter(m[1])};
+  if((m=ab.match(/put (a|an|one|two|three|four|five|\d+) \+1\/\+1 counters? on target ([a-z ]+)/i))) return {kind:'counter', n:numWord(m[1]), filter:normFilter(m[2])};
+  if((m=ab.match(/deals? (\d+) damage to target ([a-z ]+)/i))) return {kind:'damage', n:+m[1], filter:normFilter(m[2])};
+  if((m=ab.match(/deals? (\d+) damage to any target/i))) return {kind:'damage', n:+m[1], filter:'any', canFace:true};
+  return null;
+}
+function cancelTarget(){ state.targeting=null; render(); }
+function applyTargetOpponent(){ const t=state.targeting; if(!t) return; state.targeting=null; if(t.kind==='damage'){ oppDamage(t.n); } else render(); }
+function applyTargetTo(iid){
+  const t=state.targeting; if(!t) return; const g=state.game; const c=g.battlefield.find(x=>x.iid===iid); if(!c) return;
+  const cd=card(c.cardId);
+  if(!matchesFilter(cd, t.filter)){ toast('Not a legal target'); return; }
+  state.targeting=null;
+  if(t.kind==='destroy'){ toast('Destroyed '+cd.name); gameMove(iid,'battlefield','graveyard'); }
+  else if(t.kind==='exile'){ toast('Exiled '+cd.name); gameMove(iid,'battlefield','exile'); }
+  else if(t.kind==='bounce'){ toast('Returned '+cd.name+' to hand'); gameMove(iid,'battlefield','hand'); }
+  else if(t.kind==='counter'){ c.counters=(c.counters||0)+(t.n||1); toast('+'+(t.n||1)+'/+'+(t.n||1)+' on '+cd.name); render(); }
+  else if(t.kind==='damage'){ c.damage=(c.damage||0)+t.n; const tough=parseInt(cd.toughness,10); const lethal=!isNaN(tough)&&/creature/.test((cd.type_line||'').toLowerCase())&&(c.damage>=tough+(c.counters||0)); if(lethal){ toast(t.n+' dmg — destroyed '+cd.name); gameMove(iid,'battlefield','graveyard'); } else { toast(t.n+' dmg to '+cd.name); render(); } }
+}
 function useAbility(iid, zone, idx){
   const g=state.game, c=g[zone]&&g[zone].find(x=>x.iid===iid); if(!c){ closeModal(); return; }
   const cd=card(c.cardId), lines=((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean);
   const ab=lines[idx]||''; if(!ab){ closeModal(); return; }
   const cost=ab.split(':')[0]||'';
   if(zone==='battlefield' && /\{T\}/.test(cost) && !c.tapped) c.tapped=true; // pay the tap cost
+  const tgt=targetedEffect(ab);
+  if(tgt){ state.targeting={...tgt, srcName:cd?cd.name:''}; closeModal(); render(); toast('Choose a target — tap a highlighted card'); return; }
   const did=applyAbilityText(ab, zone==='battlefield'?c:null);
   toast(did.length ? '⚡ '+did.join(' · ') : '⚡ '+(ab.length>40?ab.slice(0,40)+'…':ab)+' — do the rest by hand');
   closeModal(); render();
@@ -1243,6 +1274,7 @@ function castCommander(iid, ignoreMana){
   gameMove(iid,'command','battlefield');
 }
 function gameCardMenu(iid,zone){
+  if(state.targeting && zone==='battlefield'){ applyTargetTo(iid); return; }
   const g=state.game, c=g[zone].find(x=>x.iid===iid); if(!c) return;
   const cd=card(c.cardId), img=cd?(cd.img||cd.thumb):'';
   const isLand = cd && /\bLand\b/.test(cd.type_line||'');
@@ -1288,7 +1320,8 @@ function gameCardMenu(iid,zone){
 function gameCardHTML(c,zone){
   const cd=card(c.cardId); const thumb=cd?(cd.thumb||cd.img):'';
   const ctr=(zone==='battlefield'&&c.counters>0)?`<span class="gcard-ctr">+${c.counters}/+${c.counters}</span>`:'';
-  return `<div class="gcard${c.tapped?' tapped':''}${thumb?'':' noimg'}" style="background-image:url('${thumb}')" onclick="gameCardMenu('${c.iid}','${zone}')">${thumb?'':`<span class="gcard-lbl">${esc(cd?cd.name:'?')}</span>`}${ctr}</div>`;
+  const tgtOk=(zone==='battlefield'&&state.targeting&&matchesFilter(cd,state.targeting.filter));
+  return `<div class="gcard${c.tapped?' tapped':''}${thumb?'':' noimg'}${tgtOk?' target-ok':''}" style="background-image:url('${thumb}')" onclick="gameCardMenu('${c.iid}','${zone}')">${thumb?'':`<span class="gcard-lbl">${esc(cd?cd.name:'?')}</span>`}${ctr}</div>`;
 }
 function createToken(){
   const name=(window.prompt('Token name (e.g. "1/1 Soldier", "Treasure"):','Token')||'').trim();
@@ -1304,7 +1337,9 @@ function renderGame(){
   const cmdCard=g.commanderId?card(g.commanderId):null;
   const cmdCI=(cmdCard&&((cmdCard.ci&&cmdCard.ci.length)?cmdCard.ci:cmdCard.colors))||[];
   const showColors=cmdCI.length?[...['W','U','B','R','G'].filter(m=>cmdCI.includes(m)),'C']:MANA_COLORS;
-  let h=`<div class="game-top">
+  let tb='';
+  if(state.targeting){ const t=state.targeting; const f=(t.filter&&t.filter!=='permanent'&&t.filter!=='any')?' ('+t.filter+')':''; tb=`<div class="pick-banner">🎯 Choose a target${f} for ${esc(t.srcName||'the ability')}${t.canFace?` <button onclick="applyTargetOpponent()">🎯 Opponent</button>`:''}<button onclick="cancelTarget()">Cancel</button></div>`; }
+  let h=tb+`<div class="game-top">
       <button class="back" onclick="exitGame()">‹</button>
       <div class="ttl">${esc(g.deckName)}</div>
       <span class="turn-badge">Turn ${g.turn}</span>
@@ -2084,7 +2119,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,
+  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,cancelTarget,applyTargetOpponent,applyTargetTo,
   openShare,joinRoom,leaveSession,copyShare});
 
 render();
