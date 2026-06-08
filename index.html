@@ -369,7 +369,7 @@ async function scrySearch(q){
   if(!q.trim()){ state.searchResults=[]; if(state.tab==='search') render(); return; }
   setSearchLoading(true);
   try{
-    const query = state.pickCommanderFor ? '('+q+') is:commander' : q;
+    const query = (state.pickCommanderFor||state.generateMode) ? '('+q+') is:commander' : q;
     const r = await fetch('https://api.scryfall.com/cards/search?unique=cards&order=name&q='+encodeURIComponent(query));
     if(seq!==searchSeq) return; // stale
     if(r.status===404){ state.searchResults=[]; }
@@ -413,7 +413,8 @@ function deckCardCount(deck){ let n=deck.commander?1:0; for(const id in deck.car
 function renderDecks(){
   let h = `<div class="row between" style="margin-bottom:14px">
       <div class="section-title" style="margin:0">Your Decks (${state.decks.length})</div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:6px">
+        <button class="btn sm" onclick="startGenerate()">✨ Build</button>
         <button class="btn sm" onclick="openImport()">📋 Import</button>
         <button class="btn gold sm" onclick="openDeckModal()">＋ New</button>
       </div>
@@ -579,6 +580,7 @@ function manaText(m){ return m? m.replace(/[{}]/g,'').replace(/\//g,'/') || '—
 function renderSearch(){
   const picking = state.pickCommanderFor ? state.decks.find(x=>x.id===state.pickCommanderFor) : null;
   const adding = (!picking && state.addToDeckId) ? state.decks.find(x=>x.id===state.addToDeckId) : null;
+  const generating = (!picking && !adding && state.generateMode);
   let h = '';
   if(picking){
     h += `<div class="pick-banner">👑 Choosing commander for <b>${esc(picking.name)}</b><button onclick="cancelPickCommander()">Cancel</button></div>`;
@@ -586,8 +588,11 @@ function renderSearch(){
   if(adding){
     h += `<div class="pick-banner">🗂️ Adding to <b>${esc(adding.name)}</b><button onclick="finishAdding()">Done</button></div>`;
   }
+  if(generating){
+    h += `<div class="pick-banner">✨ Pick a commander to auto-build a deck<button onclick="cancelGenerate()">Cancel</button></div>`;
+  }
   h += `<div class="search-wrap">
-      <input id="searchInput" placeholder="${picking?'Search for a commander…':adding?'Search cards to add…':'Search cards, e.g. lightning bolt'}" value="${esc(state.searchQuery)}" autocomplete="off">
+      <input id="searchInput" placeholder="${(picking||generating)?'Search for a commander…':adding?'Search cards to add…':'Search cards, e.g. lightning bolt'}" value="${esc(state.searchQuery)}" autocomplete="off">
       <div id="searchSpin" class="spin hidden"></div>
     </div>`;
   if(!state.searchQuery.trim()){
@@ -609,7 +614,7 @@ function renderSearch(){
           <div class="nm">${esc(c.name)} ${pips(c.colors&&c.colors.length?c.colors:(c.color_identity||[]))}</div>
           <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${off?` · <span style="color:var(--danger)">off-color</span>`:inDeck?` · <span style="color:var(--accent2)">${inDeck} in deck</span>`:owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}${bannedBadge(c)}</div>
         </div>
-        <button class="btn ${off?'':'gold'} sm" onclick="${picking?`setCommander('${picking.id}','${c.id}')`:adding?`addToDeckDirect('${adding.id}','${c.id}')`:`addMenu('${c.id}')`}">${picking?'Set':adding?(off?'✕':'＋'):'Add'}</button>
+        <button class="btn ${off?'':'gold'} sm" onclick="${picking?`setCommander('${picking.id}','${c.id}')`:generating?`generateFromResult('${c.id}')`:adding?`addToDeckDirect('${adding.id}','${c.id}')`:`addMenu('${c.id}')`}">${picking?'Set':generating?'✨ Build':adding?(off?'✕':'＋'):'Add'}</button>
       </div>`;
     });
   }
@@ -710,6 +715,42 @@ async function fetchRecs(deck){
   state.analyzeRecs[deck.id]={status:'ok', cards};
   if(state.analyzeDeckId===deck.id) renderAnalyze();
 }
+function startGenerate(){ state.generateMode=true; state.tab='search'; state.searchQuery=''; state.searchResults=[]; render(); setTimeout(()=>$('#searchInput')?.focus(),60); }
+function cancelGenerate(){ state.generateMode=false; state.tab='decks'; render(); }
+function generateFromResult(cardId){ const c=state._resultMap&&state._resultMap[cardId]; if(c){ state.generateMode=false; generateDeck(c); } }
+async function generateDeck(cmd){
+  if(!cmd) return; cacheCard(cmd);
+  toast('Generating a deck for '+cmd.name+'…');
+  const ci=cmd.color_identity||[];
+  let names=[];
+  try{
+    const r=await fetch('https://json.edhrec.com/pages/commanders/'+slugify(cmd.name)+'.json');
+    if(r.ok){ const d=await r.json(); const cls=((d.container&&d.container.json_dict&&d.container.json_dict.cardlists)||d.cardlists||[]).slice();
+      const pri=hd=>{hd=(hd||'').toLowerCase(); if(hd.includes('top cards'))return 0; if(hd.includes('high synergy')||hd.includes('signature'))return 1; if(hd.includes('new'))return 9; return 5;};
+      cls.sort((a,b)=>pri(a.header)-pri(b.header));
+      cls.forEach(cl=>(cl.cardviews||cl.cardlist||[]).forEach(cv=>cv&&cv.name&&names.push(cv.name)));
+    }
+  }catch(e){}
+  const cmdName=cmd.name.toLowerCase(); const seen=new Set([cmdName]);
+  names=names.filter(n=>{const k=n.toLowerCase(); if(seen.has(k))return false; seen.add(k); return true;});
+  if(!names.length) names=await scryfallFallbackRecs(cmd, new Set([cmdName]));
+  const {found}=await scryCollection(names.slice(0,150));
+  const isLand=c=>/\bLand\b/.test(c.type_line||'');
+  const within=found.filter(c=>(c.color_identity||[]).every(x=>ci.includes(x)) && c.name.toLowerCase()!==cmdName && !/^Basic/.test(c.type_line||''));
+  const spells=within.filter(c=>!isLand(c)), lands=within.filter(isLand);
+  const chosen=[...spells.slice(0,63), ...lands.slice(0,36)].slice(0,99);
+  const id=uid(); const deck={id,name:cmd.name+' (auto)',format:'Commander',commander:cmd.id,cards:{}};
+  chosen.forEach(c=>{ cacheCard(c); deck.cards[c.id]=1; });
+  const need=99-Object.keys(deck.cards).length;
+  if(need>0){
+    const map={W:'Plains',U:'Island',B:'Swamp',R:'Mountain',G:'Forest'};
+    const basicNames=ci.length?ci.map(c=>map[c]):['Wastes'];
+    const bf=(await scryCollection(basicNames)).found;
+    if(bf.length){ for(let i=0;i<need;i++){ const b=bf[i%bf.length]; cacheCard(b); deck.cards[b.id]=(deck.cards[b.id]||0)+1; } }
+  }
+  state.decks.push(deck); state.tab='decks'; state.openDeckId=id; DB.save(); render();
+  toast('Built '+cmd.name+' — '+deckCardCount(deck)+' cards');
+}
 function renderAnalyze(){
   const decks=state.decks;
   if(!state.analyzeDeckId || !decks.find(d=>d.id===state.analyzeDeckId)){
@@ -733,16 +774,31 @@ function renderAnalyze(){
   if(avgDen && +avg>3.8) notes.push('ℹ️ High average mana value ('+avg+') — the deck may play slowly.');
   if(!notes.length) notes.push('✓ Land count and curve look reasonable.');
   // function categories → strengths / weaknesses
-  const catCount={ramp:0,draw:0,removal:0,wipe:0,counter:0};
+  const catCount={ramp:0,draw:0,removal:0,wipe:0,counter:0,tutor:0,recursion:0};
   for(const id in d.cards){ const c=card(id); if(!c) continue; cardCategories(c).forEach(cat=>{ if(catCount[cat]!=null) catCount[cat]+=d.cards[id]; }); }
-  const targets={ramp:[8,'Ramp / acceleration'], draw:[8,'Card draw'], removal:[6,'Targeted removal'], wipe:[2,'Board wipes']};
+  const targets={
+    ramp:[8,'Ramp / acceleration','mana rocks & dorks cast your commander and big spells on time'],
+    draw:[8,'Card draw','card-advantage engines keep your hand full'],
+    removal:[6,'Targeted removal','spot removal answers problem permanents'],
+    wipe:[2,'Board wipes','sweepers reset the board when you fall behind'],
+    tutor:[2,'Tutors','tutors find your key pieces more consistently'],
+    recursion:[2,'Recursion','recursion buys back your best cards'],
+  };
   const strengths=[], weaknesses=[], weakKeys=[];
-  Object.keys(targets).forEach(k=>{ const need=targets[k][0], label=targets[k][1], v=catCount[k]; if(v>=need) strengths.push(label+' ('+v+')'); else { weaknesses.push(label+' — only '+v+' (aim ~'+need+')'); weakKeys.push(k); } });
-  if(catCount.counter>=4) strengths.push('Counterspells ('+catCount.counter+')');
+  Object.keys(targets).forEach(k=>{ const [need,label,why]=targets[k], v=catCount[k];
+    if(v>=need) strengths.push(label+' — '+v);
+    else { weaknesses.push(label+': only '+v+' (aim ~'+need+') — '+why); weakKeys.push(k); } });
+  const interaction=catCount.removal+catCount.wipe+catCount.counter;
+  if(interaction>=10) strengths.push('Lots of interaction ('+interaction+' removal/wipes/counters)');
+  else if(interaction<5) { weaknesses.push('Very little interaction ('+interaction+' total) — you can’t stop opponents’ key plays'); if(!weakKeys.includes('removal')) weakKeys.push('removal'); }
+  if(catCount.counter>=4) strengths.push('Counterspells — '+catCount.counter);
   if(lands>=(isCmd?34:22) && lands<=(isCmd?42:28)) strengths.push('Solid mana base ('+lands+' lands)');
-  else if(lands<(isCmd?34:22)) weaknesses.push('Mana base — '+lands+' lands (aim '+(isCmd?'36–38':'~24')+')');
-  if(avgDen && +avg<=3.2) strengths.push('Low, efficient curve (avg MV '+avg+')');
-  else if(avgDen && +avg>3.8) weaknesses.push('High curve (avg MV '+avg+') — may be slow');
+  else if(lands<(isCmd?34:22)) weaknesses.push('Mana base: '+lands+' lands (aim '+(isCmd?'36–38':'~24')+') — you’ll miss land drops');
+  else if(lands>(isCmd?42:28)) weaknesses.push('Too many lands ('+lands+') — you’ll flood; cut a few for spells');
+  if(avgDen && +avg<=2.8) strengths.push('Low, fast curve (avg MV '+avg+')');
+  else if(avgDen && +avg>3.8) weaknesses.push('High curve (avg MV '+avg+') — slow starts; add ramp or cheaper cards');
+  if(isCmd && n<100) weaknesses.push((100-n)+' cards short of a legal 100');
+  if(!strengths.length) strengths.push('Add more cards to surface strengths');
 
   let h=`<div class="detail-head"><button class="back" onclick="closeAnalyze()">‹</button><div class="ttl">${esc(d.name)}</div></div>
     <div class="statgrid"><div class="stat"><div class="v">${n}</div><div class="l">Cards</div></div><div class="stat"><div class="v">${lands}</div><div class="l">Lands</div></div><div class="stat"><div class="v">${avg}</div><div class="l">Avg MV</div></div></div>`;
@@ -910,6 +966,8 @@ function cardCategories(c){
   if(/counter target (spell|ability)/.test(t)) cats.push('counter');
   if(/(destroy|exile) all |all creatures get -|deals? \d+ damage to each|sacrifices? (a|all|that many)/.test(t)) cats.push('wipe');
   else if(/(destroy|exile) target (creature|permanent|artifact|enchantment|planeswalker|nonland)|deals? \d+ damage to (any target|target creature|target planeswalker)|fight target/.test(t)) cats.push('removal');
+  if(/search your library for [^.]{0,70}\bcard/.test(t) && !/search your library for[^.]{0,40}\bland/.test(t)) cats.push('tutor');
+  if(/return [^.]{0,50}from (your|a) graveyard/.test(t)) cats.push('recursion');
   return cats;
 }
 function hasUntapEnabler(){ return state.game.battlefield.some(c=>{ const cd=card(c.cardId); return cd && /untap/i.test(cd.text||''); }); }
@@ -1260,7 +1318,7 @@ function copyShare(){ const u=shareUrl(); if(navigator.clipboard&&navigator.clip
 // ============================================================
 //  ACTIONS
 // ============================================================
-function setTab(t){ state.pickCommanderFor=null; state.addToDeckId=null; state.tab=t; state.openDeckId=null; render(); if(t==='search') setTimeout(()=>$('#searchInput')?.focus(),50); }
+function setTab(t){ state.pickCommanderFor=null; state.addToDeckId=null; state.generateMode=false; state.tab=t; state.openDeckId=null; render(); if(t==='search') setTimeout(()=>$('#searchInput')?.focus(),50); }
 function openDeck(id){ state.openDeckId=id; render(); }
 function closeDeck(){ state.openDeckId=null; render(); }
 
@@ -1957,6 +2015,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
   setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,installApp,
+  startGenerate,cancelGenerate,generateFromResult,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
   setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,
