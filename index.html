@@ -297,13 +297,15 @@ const DB = {
         decks: JSON.parse(localStorage.getItem('pdb_decks')||'[]'),
         collection: JSON.parse(localStorage.getItem('pdb_collection')||'{}'),
         cards: JSON.parse(localStorage.getItem('pdb_cards')||'{}'),
+        wishlist: JSON.parse(localStorage.getItem('pdb_wishlist')||'{}'),
       };
-    }catch(e){ return {decks:[],collection:{},cards:{}}; }
+    }catch(e){ return {decks:[],collection:{},cards:{},wishlist:{}}; }
   },
   save(){
     localStorage.setItem('pdb_decks', JSON.stringify(state.decks));
     localStorage.setItem('pdb_collection', JSON.stringify(state.collection));
     localStorage.setItem('pdb_cards', JSON.stringify(state.cards));
+    localStorage.setItem('pdb_wishlist', JSON.stringify(state.wishlist));
     if(state.user && !window._applyingRemote) scheduleCloudPush();
   }
 };
@@ -313,6 +315,8 @@ const state = {
   decks: loaded.decks,        // [{id,name,format,cards:{cardId:qty}}]
   collection: loaded.collection, // {cardId:qty}
   cards: loaded.cards,        // {cardId:{cached card fields}}
+  wishlist: loaded.wishlist||{}, // {cardId:1}
+  collMode: 'owned',
   openDeckId: null,
   searchResults: [],
   searchQuery: '',
@@ -341,6 +345,7 @@ function cacheCard(c){
       ci: c.color_identity||[],
       power: (c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null,
       legal: c.legalities||{},
+      tcg: (c.purchase_uris&&c.purchase_uris.tcgplayer)||null,
     };
   }
   return state.cards[c.id];
@@ -637,7 +642,38 @@ function setCollFilter(key,val){
   if(key==='q'){ const i=$('#collQ'); if(i){ i.focus(); const v=i.value; i.value=''; i.value=v; } }
 }
 function clearCollFilter(){ state.collFilter={q:'',type:'',color:'',cmc:'',rarity:''}; renderCollection(); }
+function setCollMode(m){ state.collMode=m; renderCollection(); }
+function tcgLink(cd){ return (cd&&cd.tcg) || ('https://www.tcgplayer.com/search/magic/product?productLineName=magic&q='+encodeURIComponent(cd?cd.name:'')); }
+function addToWishlist(cardId){ const c=state._resultMap&&state._resultMap[cardId]; if(c) cacheCard(c); state.wishlist[cardId]=1; DB.save(); toast('Added to wishlist'); }
+function removeWishlist(cardId){ delete state.wishlist[cardId]; DB.save(); renderCollection(); }
+function wishlistHTML(){
+  const ids=Object.keys(state.wishlist).filter(id=>state.wishlist[id]);
+  ids.sort((a,b)=>(card(a)?.name||'').localeCompare(card(b)?.name||''));
+  let val=0; ids.forEach(id=>{ const p=card(id)?.price; if(p) val+=parseFloat(p); });
+  let h=`<div class="statgrid">
+      <div class="stat"><div class="v">${ids.length}</div><div class="l">Wishlist</div></div>
+      <div class="stat"><div class="v">$${val.toFixed(0)}</div><div class="l">Est. Cost</div></div>
+      <div class="stat"><div class="v">🛒</div><div class="l">TCGplayer</div></div>
+    </div>`;
+  if(!ids.length){ h+=`<div class="empty"><div class="big">⭐</div><div class="t">Wishlist is empty</div><div class="tiny">From Search, tap a card → ⭐ To wishlist.</div><button class="btn gold full" style="margin-top:16px" onclick="setTab('search')">🔍 Find cards</button></div>`; return h; }
+  h+=`<div class="section-title">Most Wanted (${ids.length})</div>`;
+  ids.forEach(id=>{ const c=card(id); if(!c) return;
+    h+=`<div class="cardrow">
+      <div class="thumb" style="background-image:url('${c.thumb||''}')" onclick="showCard('${id}')"></div>
+      <div class="info" onclick="showCard('${id}')"><div class="nm">${esc(c.name)}</div><div class="meta">${esc(shortType(c.type_line))}${c.price?' · $'+c.price:''}</div></div>
+      <a class="btn gold sm" href="${tcgLink(c)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🛒 Buy</a>
+      <button class="iconbtn" onclick="removeWishlist('${id}')">✕</button>
+    </div>`;
+  });
+  return h;
+}
 function renderCollection(){
+  const cmode=state.collMode||'owned';
+  const toggle=`<div class="play-ctrl" style="margin-bottom:12px"><div class="pc-group">
+      <button class="pc-btn ${cmode==='owned'?'on':''}" onclick="setCollMode('owned')">📚 Owned</button>
+      <button class="pc-btn ${cmode==='wishlist'?'on':''}" onclick="setCollMode('wishlist')">⭐ Wishlist</button>
+    </div></div>`;
+  if(cmode==='wishlist'){ main.innerHTML = toggle + wishlistHTML(); return; }
   const f=state.collFilter;
   const ids = Object.keys(state.collection).filter(id=>state.collection[id]>0);
   let totalCards=0, totalVal=0; const unique=ids.length;
@@ -679,7 +715,7 @@ function renderCollection(){
     if(!shown.length) h += `<div class="empty" style="padding:30px 20px"><div class="t">No cards match these filters</div></div>`;
     else shown.forEach(id=>{ h += cardRowHTML(card(id), state.collection[id], `collQty('${id}',-1)`, `collQty('${id}',1)`); });
   }
-  main.innerHTML = h;
+  main.innerHTML = toggle + h;
 }
 
 // ---------- ANALYZE ----------
@@ -1648,6 +1684,7 @@ function addMenu(cardId){
       <h3>Add “${esc(nm)}”</h3>
       <div class="addmenu">
         <button class="btn gold full" onclick="addToCollection('${cardId}');closeModal()">📚 To collection</button>
+        <button class="btn full" onclick="addToWishlist('${cardId}');closeModal()">⭐ To wishlist</button>
         <div class="section-title" style="margin:8px 2px 2px">Add to deck</div>
         ${deckBtns}
         <button class="btn ghost full" style="margin-top:6px" onclick="closeModal()">Cancel</button>
@@ -1974,7 +2011,7 @@ function signOutUser(){ if(_auth) _auth.signOut(); closeModal(); toast('Signed o
 // cloud sync
 let cloudPushTimer=null;
 function scheduleCloudPush(){ if(!state.user||!window._db) return; clearTimeout(cloudPushTimer); cloudPushTimer=setTimeout(pushCloud,1200); }
-function pushCloud(){ if(!state.user||!window._db) return; window._db.collection('users').doc(state.user.uid).set({decks:state.decks,collection:state.collection,cards:state.cards,_ts:Date.now()}).catch(()=>{}); }
+function pushCloud(){ if(!state.user||!window._db) return; window._db.collection('users').doc(state.user.uid).set({decks:state.decks,collection:state.collection,cards:state.cards,wishlist:state.wishlist,_ts:Date.now()}).catch(()=>{}); }
 function mergeData(cloud, local){
   if(!cloud) return local;
   const ids=new Set((cloud.decks||[]).map(d=>d.id));
@@ -1982,23 +2019,24 @@ function mergeData(cloud, local){
   const collection={...(cloud.collection||{})};
   for(const k in (local.collection||{})) collection[k]=Math.max(collection[k]||0, local.collection[k]);
   const cards={...(local.cards||{}), ...(cloud.cards||{})};
-  return {decks,collection,cards};
+  const wishlist={...(cloud.wishlist||{}), ...(local.wishlist||{})};
+  return {decks,collection,cards,wishlist};
 }
 async function subscribeCloud(uid){
   const ref=window._db.collection('users').doc(uid);
   try{
     const snap=await ref.get();
     const cloud=snap.exists?snap.data():null;
-    const merged=mergeData(cloud,{decks:state.decks,collection:state.collection,cards:state.cards});
-    window._applyingRemote=true; state.decks=merged.decks; state.collection=merged.collection; state.cards=merged.cards; DB.save(); window._applyingRemote=false;
-    await ref.set({decks:merged.decks,collection:merged.collection,cards:merged.cards,_ts:Date.now()});
+    const merged=mergeData(cloud,{decks:state.decks,collection:state.collection,cards:state.cards,wishlist:state.wishlist});
+    window._applyingRemote=true; state.decks=merged.decks; state.collection=merged.collection; state.cards=merged.cards; state.wishlist=merged.wishlist; DB.save(); window._applyingRemote=false;
+    await ref.set({decks:merged.decks,collection:merged.collection,cards:merged.cards,wishlist:merged.wishlist,_ts:Date.now()});
     render();
   }catch(e){ toast('Sync: '+(e.code||'check Firestore rules')); }
   window._cloudUnsub=ref.onSnapshot(snap=>{
     const data=snap.data(); if(!data) return;
-    const incoming=JSON.stringify({d:data.decks||[],c:data.collection||{},k:data.cards||{}});
-    const localStr=JSON.stringify({d:state.decks,c:state.collection,k:state.cards});
-    if(incoming!==localStr){ window._applyingRemote=true; state.decks=data.decks||[]; state.collection=data.collection||{}; state.cards=data.cards||{}; DB.save(); window._applyingRemote=false; render(); }
+    const incoming=JSON.stringify({d:data.decks||[],c:data.collection||{},k:data.cards||{},w:data.wishlist||{}});
+    const localStr=JSON.stringify({d:state.decks,c:state.collection,k:state.cards,w:state.wishlist});
+    if(incoming!==localStr){ window._applyingRemote=true; state.decks=data.decks||[]; state.collection=data.collection||{}; state.cards=data.cards||{}; state.wishlist=data.wishlist||{}; DB.save(); window._applyingRemote=false; render(); }
   });
 }
 
@@ -2010,6 +2048,7 @@ document.querySelectorAll('nav button').forEach(b=>{
 // expose for inline handlers
 Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQty,collQty,
   addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,
+  setCollMode,addToWishlist,removeWishlist,
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
