@@ -1199,6 +1199,14 @@ function applyAbilityText(ab, c){
   if((m=ab.match(/\bmills? (\d+)/i)) || (m=ab.match(/top (\d+) cards?[^.]*?into[^.]*?graveyard/i))){ const n=+m[1]; let k=0; for(let i=0;i<n&&g.library.length;i++){ g.graveyard.push(g.library.shift()); k++; } did.push('milled '+k); }
   // you lose life
   if((m=ab.match(/you lose (\d+) life/i))){ g.life-=+m[1]; did.push('−'+m[1]+' life'); }
+  // investigate → Clue token
+  if(/\binvestigate\b/i.test(ab)){ makeToken('Clue', 0, 1); did.push('made a Clue'); }
+  // amass Orcs/Zombies N → an Army token of that size
+  if((m=ab.match(/amass \w+ (\d+|x)/i))){ const nn=m[1].toLowerCase()==='x'?1:+m[1]; makeToken('Army', nn, 1); did.push('amassed Army '+nn+'/'+nn); }
+  // exile top N of library
+  if((m=ab.match(/exile the top (\d+) cards?/i))){ const n=+m[1]; let k=0; for(let i=0;i<n&&g.library.length;i++){ g.exile.push(g.library.shift()); k++; } did.push('exiled top '+k); }
+  // proliferate (note only — you pick what)
+  if(/\bproliferate\b/i.test(ab)){ did.push('proliferate (add a counter to each chosen permanent)'); }
   return did;
 }
 function useAbility(iid, zone, idx){
