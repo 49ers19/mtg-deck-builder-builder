@@ -1886,55 +1886,30 @@ async function scryNamed(name){
 
 async function matchScan(name){
   setScanStatus('Matching “'+name+'”…',true);
-  let c=await scryNamed(name);
-  if(!c){
-    // autocomplete: snap a partial/garbled read to the closest real card name
-    try{
-      const r=await fetch('https://api.scryfall.com/cards/autocomplete?q='+encodeURIComponent(name));
-      if(r.ok){ const d=await r.json(); if(d.data&&d.data[0]) c=await scryNamed(d.data[0]); }
-    }catch(e){}
-  }
-  if(!c){
-    try{ const r=await fetch('https://api.scryfall.com/cards/search?q='+encodeURIComponent(name)); if(r.ok){ const d=await r.json(); c=(d.data||[])[0]; } }catch(e){}
-  }
+  const cands=[], seen=new Set();
+  const add=c=>{ if(c&&!seen.has(c.id)){ seen.add(c.id); cands.push(c); } };
+  add(await scryNamed(name)); // best fuzzy match first
+  try{ const r=await fetch('https://api.scryfall.com/cards/autocomplete?q='+encodeURIComponent(name)); if(r.ok){ const d=await r.json(); const names=(d.data||[]).slice(0,8); if(names.length){ (await scryCollection(names)).found.forEach(add); } } }catch(e){}
+  if(!cands.length){ try{ const r=await fetch('https://api.scryfall.com/cards/search?q='+encodeURIComponent(name)); if(r.ok){ const d=await r.json(); (d.data||[]).slice(0,8).forEach(add); } }catch(e){} }
   setScanStatus('',false);
-  showScanResult(c,name);
+  showScanResult(name, cands);
 }
-
-function showScanResult(c,readName){
-  const box=$('#scanResult'); if(!box) return;
-  box.classList.remove('hidden');
-  if(c){
-    state._scanCard=c; cacheCard(c);
-    const img=(c.image_uris&&c.image_uris.small)||(c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small)||'';
-    box.innerHTML=`
-      <div class="scan-card">
-        <div class="thumb" style="background-image:url('${img}')"></div>
-        <div class="info">
-          <div class="nm">${esc(c.name)} ${pips(c.colors&&c.colors.length?c.colors:(c.color_identity||[]))}</div>
-          <div class="meta">${esc(shortType(c.type_line||''))} · ${(c.set||'').toUpperCase()}</div>
-        </div>
-      </div>
-      <div class="scan-actions">
-        <button class="btn gold full" onclick="scanConfirm()">✓ Add to collection</button>
-        <div class="row" style="gap:8px">
-          <button class="btn full" onclick="scanEdit()">Wrong? Edit</button>
-          <button class="btn full" onclick="scanDismiss()">Scan next</button>
-        </div>
-      </div>`;
+function showScanResult(readName, cands){
+  const box=$('#scanResult'); if(!box) return; box.classList.remove('hidden');
+  state._scanCands={}; (cands||[]).forEach(c=>state._scanCands[c.id]=c);
+  let h=`<div class="row" style="gap:8px;margin-bottom:8px"><input id="scanEditInput" class="scan-input" value="${esc(readName)}" autocomplete="off" style="flex:1"><button class="btn" onclick="scanResearch()">🔎</button></div>`;
+  if(!cands||!cands.length){
+    h+=`<div class="tiny muted" style="text-align:center;padding:6px 0 10px">No match — fix the name above and tap 🔎</div>`;
   } else {
-    state._scanCard=null;
-    box.innerHTML=`
-      <div class="scan-card"><div class="info"><div class="nm">No match for “${esc(readName)}”</div><div class="meta">Fix the name and search again</div></div></div>
-      <div class="scan-actions">
-        <input id="scanEditInput" class="scan-input" value="${esc(readName)}" autocomplete="off">
-        <div class="row" style="gap:8px">
-          <button class="btn gold full" onclick="scanResearch()">Search</button>
-          <button class="btn full" onclick="scanDismiss()">Rescan</button>
-        </div>
-      </div>`;
+    h+=`<div class="tiny muted" style="margin-bottom:6px">Tap the right card to add it:</div>`;
+    h+=cands.map(c=>{ const img=(c.image_uris&&c.image_uris.small)||(c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small)||''; const owned=state.collection[c.id]||0;
+      return `<div class="cardrow"><div class="thumb" style="background-image:url('${img}')"></div><div class="info"><div class="nm">${esc(c.name)}</div><div class="meta">${esc(shortType(c.type_line||''))} · ${(c.set||'').toUpperCase()}${owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}</div></div><button class="btn gold sm" onclick="scanAdd('${c.id}')">Add</button></div>`;
+    }).join('');
   }
+  h+=`<button class="btn ghost full" style="margin-top:8px" onclick="scanDismiss()">Scan next</button>`;
+  box.innerHTML=h;
 }
+function scanAdd(cardId){ const c=state._scanCands&&state._scanCands[cardId]; if(c){ cacheCard(c); state.collection[c.id]=(state.collection[c.id]||0)+1; DB.save(); toast(state.collection[c.id]+'× '+c.name+' added'); } scanDismiss(); }
 
 function scanConfirm(){
   const c=state._scanCard; if(!c) return;
@@ -2069,7 +2044,7 @@ document.querySelectorAll('nav button').forEach(b=>{
 Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQty,collQty,
   addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,
   setCollMode,addToWishlist,removeWishlist,
-  openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,
+  openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,scanAdd,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,
