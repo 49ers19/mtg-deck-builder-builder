@@ -1389,9 +1389,9 @@ function gameCardMenu(iid,zone){
     <h3>${cd?esc(cd.name):'Card'}</h3>
     ${img?`<img src="${img}" style="width:150px;border-radius:11px;display:block;margin:0 auto 12px">`:''}
     ${cd&&cd.type_line?`<div class="tiny muted" style="text-align:center;margin-bottom:8px">${esc(cd.type_line)}${cd.mana_cost?' · '+manaText(cd.mana_cost):''}${bannedBadge(cd)}</div>`:''}
+    <div class="addmenu">${acts.map(a=>`<button class="btn full${/graveyard|exile/i.test(a[0])?' danger':''}" onclick="${a[1]}">${a[0]}</button>`).join('')}</div>
     ${abilitiesHTML}
-    <div class="addmenu">${acts.map(a=>`<button class="btn full" onclick="${a[1]}">${a[0]}</button>`).join('')}
-    <button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div></div>`;
+    <div class="addmenu"><button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div></div>`;
 }
 function gameCardHTML(c,zone){
   const cd=card(c.cardId); const thumb=cd?(cd.thumb||cd.img):'';
