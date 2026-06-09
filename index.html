@@ -230,6 +230,7 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .gcard{position:relative;width:48px;height:67px;border-radius:5px;background:var(--bg2) center/cover;border:1px solid var(--line);cursor:pointer;flex-shrink:0;transition:transform .08s}
 .gcard-ctr{position:absolute;bottom:2px;right:2px;background:var(--ok);color:#0d0f1a;font-size:8px;font-weight:800;padding:1px 3px;border-radius:4px;line-height:1.1}
 .gcard-dmg{position:absolute;top:2px;right:2px;background:var(--danger);color:#fff;font-size:8px;font-weight:800;padding:1px 3px;border-radius:4px;line-height:1.1}
+.gcard-sick{position:absolute;top:2px;left:2px;font-size:11px;line-height:1;filter:drop-shadow(0 1px 2px #000)}
 .gcard:active{transform:scale(1.05)}
 .gcard.tapped{opacity:.45;filter:grayscale(.6);transform:rotate(10deg)}
 .gcard.target-ok{outline:2px solid var(--accent2);box-shadow:0 0 10px rgba(227,193,75,.6);cursor:pointer;animation:tgtpulse 1s ease-in-out infinite}
@@ -1056,12 +1057,12 @@ function gameDrawBtn(){ if(!hasDrawEnabler()){ toast('You only draw on your draw
 const PHASES=['Untap','Upkeep','Draw','Main 1','Combat','End'];
 const MANA_COLORS=['W','U','B','R','G','C'];
 function emptyPool(){ return {W:0,U:0,B:0,R:0,G:0,C:0}; }
-function gameNextTurn(){ const g=state.game; g.turn++; g.phase=3; g.battlefield.forEach(c=>{c.tapped=false;delete c.damage;delete c.tempPump;delete c.tempMinus;}); g.landsThisTurn=0; g.pool=emptyPool(); const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
+function gameNextTurn(){ const g=state.game; g.turn++; g.phase=3; g.battlefield.forEach(c=>{c.tapped=false;c.sick=false;delete c.damage;delete c.tempPump;delete c.tempMinus;}); g.landsThisTurn=0; g.pool=emptyPool(); const drew=gameDraw(); toast(drew?'Turn '+g.turn+' · drew a card':'Turn '+g.turn+' · library empty!'); render(); }
 function gameNextPhase(){
   const g=state.game; let p=(g.phase==null?3:g.phase)+1;
   if(p>=PHASES.length){ p=0; g.turn++; }
   g.phase=p;
-  if(PHASES[p]==='Untap'){ g.battlefield.forEach(c=>{c.tapped=false;delete c.damage;delete c.tempPump;delete c.tempMinus;}); g.landsThisTurn=0; g.pool=emptyPool(); toast('Turn '+g.turn+' · untap — mana refreshed'); }
+  if(PHASES[p]==='Untap'){ g.battlefield.forEach(c=>{c.tapped=false;c.sick=false;delete c.damage;delete c.tempPump;delete c.tempMinus;}); g.landsThisTurn=0; g.pool=emptyPool(); toast('Turn '+g.turn+' · untap — mana refreshed'); }
   else if(PHASES[p]==='Draw'){ const d=gameDraw(); toast(d?'Draw step · drew a card':'Draw step · library empty!'); }
   else toast(PHASES[p]);
   render();
@@ -1071,6 +1072,7 @@ function addMana(color,n){ const g=state.game; g.pool[color]=(g.pool[color]||0)+
 function clearPool(){ state.game.pool=emptyPool(); render(); }
 function tapForMana(iid){
   const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c||c.tapped) return;
+  if(summonSick(c)){ toast('💤 Summoning sick — can’t tap until your next turn (needs haste)'); closeModal(); return; }
   const cd=card(c.cardId);
   let prod=(cd&&cd.produced&&cd.produced.length)?cd.produced.slice():((cd&&cd.colors&&cd.colors.length)?cd.colors.slice():['C']);
   const uniq=[...new Set(prod.map(m=>MANA_COLORS.includes(m)?m:'C'))];
@@ -1079,6 +1081,7 @@ function tapForMana(iid){
 }
 function tapAddMana(iid, color){
   const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c) return;
+  if(summonSick(c)){ toast('💤 Summoning sick — can’t tap until your next turn (needs haste)'); closeModal(); return; }
   c.tapped=true; g.pool[color]=(g.pool[color]||0)+1;
   closeModal(); render();
 }
@@ -1100,6 +1103,7 @@ function tapCard(iid){
 function tapDo(iid, kind, idx){
   const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c){ closeModal(); return; }
   if(kind==='mana'){ tapForMana(iid); return; }
+  if((kind==='attack'||(kind==='ab'&&/\{T\}/.test((((card(c.cardId)||{}).text||'').split('\n')[idx]||'').split(':')[0]||''))) && summonSick(c)){ toast('💤 Summoning sick — '+(kind==='attack'?'can’t attack':'can’t use a tap ability')+' until your next turn (needs haste)'); closeModal(); return; }
   c.tapped=true;
   if(kind==='attack'){ const pw=creaturePower(card(c.cardId))+(c.counters||0); g.oppLife=(g.oppLife||0)-pw; if(g.oppLife<=0){ g.oppLife=0; toast('🏆 Hit for '+pw+' — opponent defeated!'); } else toast('⚔️ Attacked for '+pw); }
   else if(kind==='ab'){ useAbility(iid,'battlefield',idx); return; }
@@ -1130,7 +1134,7 @@ function castFromHand(iid, ignoreMana){
     if(!canPay(need)){ toast('Not enough mana for '+(cd?cd.name:'that')+' — tap lands first'); closeModal(); return; }
     payCost(need);
   }
-  const idx=g.hand.findIndex(x=>x.iid===iid); const moved=g.hand.splice(idx,1)[0]; moved.tapped=false; g.battlefield.push(moved);
+  const idx=g.hand.findIndex(x=>x.iid===iid); const moved=g.hand.splice(idx,1)[0]; moved.tapped=false; markEntry(moved); g.battlefield.push(moved);
   closeModal(); render();
 }
 function gameLandLimit(d){ const g=state.game; g.landLimit=Math.max(1,(g.landLimit||1)+d); render(); }
@@ -1170,19 +1174,25 @@ function gameMove(iid,from,to){
   // tokens cease to exist the moment they leave the battlefield (state-based action)
   const cd0=card(c.cardId);
   if(from==='battlefield' && to!=='battlefield' && cd0 && /token/i.test(cd0.type_line||'')){ toast((cd0.name||'Token')+' (token) ceased to exist'); closeModal(); render(); return; }
-  if(to==='battlefield'){ c.tapped=false; g.battlefield.push(c); }
+  if(to==='battlefield'){ c.tapped=false; markEntry(c); g.battlefield.push(c); }
   else if(to==='libraryTop'){ delete c.tapped; delete c.counters; g.library.unshift(c); }
   else if(to==='libraryBottom'){ delete c.tapped; delete c.counters; g.library.push(c); }
   else { delete c.tapped; delete c.counters; g[to].push(c); }
   closeModal(); render();
 }
 function creaturePower(cd){ const p=parseInt(cd&&cd.power,10); return isNaN(p)?0:Math.max(0,p); }
+function isCreatureCard(cd){ return /creature/i.test((cd&&cd.type_line)||''); }
+function hasHaste(cd){ return /\bhaste\b/i.test(((cd&&cd.text)||'')) || /\bhaste\b/i.test(((cd&&cd.keywords)||[]).join(' ')); }
+// Mark a freshly-entered permanent: creatures without haste have summoning sickness until your next turn.
+function markEntry(entry){ const cd=card(entry.cardId); entry.sick = !!(isCreatureCard(cd) && !hasHaste(cd)); }
+// Can this creature attack / use a {T} ability right now?
+function summonSick(c){ return !!c.sick && isCreatureCard(card(c.cardId)); }
 function numWord(w){ w=(w||'').toLowerCase(); const m={a:1,an:1,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10}; if(m[w]!=null) return m[w]; const n=parseInt(w,10); return isNaN(n)?1:n; }
 function makeToken(name, power, count){
   for(let i=0;i<(count||1);i++){
     const tid='tok-'+uid();
     state.cards[tid]={id:tid,name:name||'Token',mana_cost:'',cmc:0,type_line:'Token Creature',colors:[],img:'',thumb:'',set:'',produced:[],text:'',power:power!=null?String(power):null,ci:[],legal:{}};
-    state.game.battlefield.push({iid:uid(),cardId:tid,tapped:false});
+    state.game.battlefield.push({iid:uid(),cardId:tid,tapped:false,sick:true});
   }
 }
 // Parse common effect phrases and actually do them. Returns a list of what happened.
@@ -1301,6 +1311,7 @@ function useAbility(iid, zone, idx){
   const cd=card(c.cardId), lines=((cd&&cd.text)||'').split('\n').map(s=>s.trim()).filter(Boolean);
   const ab=lines[idx]||''; if(!ab){ closeModal(); return; }
   const cost=ab.split(':')[0]||'';
+  if(zone==='battlefield' && /\{T\}/.test(cost) && summonSick(c)){ toast('💤 Summoning sick — can’t use a tap ability until your next turn (needs haste)'); closeModal(); return; }
   if(zone==='battlefield' && /\{T\}/.test(cost) && !c.tapped) c.tapped=true; // pay the tap cost
   const tgt=targetedEffect(ab);
   if(tgt){
@@ -1319,6 +1330,7 @@ function useAbility(iid, zone, idx){
 function gameTap(iid){
   const g=state.game, c=g.battlefield.find(x=>x.iid===iid); if(!c){ closeModal(); return; }
   if(c.tapped){ c.tapped=false; toast('Untapped (ability)'); closeModal(); render(); return; }
+  if(summonSick(c)){ toast('💤 Summoning sick — can’t attack until your next turn (needs haste)'); closeModal(); return; }
   c.tapped=true;
   const cd=card(c.cardId);
   if(cd && /\bCreature\b/.test(cd.type_line||'')){
@@ -1389,6 +1401,7 @@ function gameCardHTML(c,zone){
     const netT=(c.counters||0)+(c.tempPump||0)-(c.tempMinus||0);
     if(netP!==0||netT!==0){ const sign=v=>(v>=0?'+'+v:''+v); badges+=`<span class="gcard-ctr">${sign(netP)}/${sign(netT)}</span>`; }
     if(c.damage>0){ badges+=`<span class="gcard-dmg">${c.damage}🩸</span>`; }
+    if(summonSick(c)){ badges+=`<span class="gcard-sick" title="Summoning sick — can't attack or use tap abilities until your next turn">💤</span>`; }
   }
   const tgtOk=(state.targeting&&zone===(state.targeting.zone||'battlefield')&&matchesFilter(cd,state.targeting.filter)&&!(state.targeting.kind==='fight'&&c.iid===state.targeting.srcIid));
   return `<div class="gcard${c.tapped?' tapped':''}${thumb?'':' noimg'}${tgtOk?' target-ok':''}" style="background-image:url('${thumb}')" onclick="gameCardMenu('${c.iid}','${zone}')">${thumb?'':`<span class="gcard-lbl">${esc(cd?cd.name:'?')}</span>`}${badges}</div>`;
@@ -1397,8 +1410,10 @@ function createToken(){
   const name=(window.prompt('Token name (e.g. "1/1 Soldier", "Treasure"):','Token')||'').trim();
   if(!name) return;
   const tid='tok-'+uid();
-  state.cards[tid]={id:tid,name,mana_cost:'',cmc:0,type_line:'Token',colors:[],img:'',thumb:'',set:'',produced:[],text:''};
-  state.game.battlefield.push({iid:uid(),cardId:tid,tapped:false});
+  const pt=name.match(/(\d+)\s*\/\s*(\d+)/); // "1/1 Soldier" → creature token
+  const isCre=!!pt;
+  state.cards[tid]={id:tid,name,mana_cost:'',cmc:0,type_line:isCre?'Token Creature':'Token',colors:[],img:'',thumb:'',set:'',produced:[],text:'',power:pt?pt[1]:null,toughness:pt?pt[2]:null};
+  state.game.battlefield.push({iid:uid(),cardId:tid,tapped:false,sick:isCre});
   toast('Token created'); render();
 }
 function renderGame(){
