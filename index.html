@@ -182,6 +182,8 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 .cmd-empty .cmd-plus{width:42px;height:42px;border-radius:10px;background:rgba(201,162,39,.15);color:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;flex-shrink:0}
 .cmd-empty .nm{font-weight:700;font-size:14px}
 .pick-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(201,162,39,.12);border:1px solid var(--accent);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:13px}
+.mm-spin{width:46px;height:46px;margin:6px auto 0;border:4px solid rgba(227,193,75,.25);border-top-color:var(--accent2);border-radius:50%;animation:mmspin 0.9s linear infinite}
+@keyframes mmspin{to{transform:rotate(360deg)}}
 .pick-banner button{margin-left:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--text)}
 .imp-text{width:100%;min-height:150px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:11px;color:var(--text);font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;line-height:1.55}
 .imp-text:focus{outline:none;border-color:var(--accent)}
@@ -327,6 +329,7 @@ const state = {
   play: { count:2, start:40, life:[40,40], poison:[0,0], cmd:[[0,0],[0,0]], mode:'life' },
   game: null,
   targeting: null,
+  matchmaking: null,
   session: null,
   collFilter: { q:'', type:'', color:'', cmc:'', rarity:'' },
   analyzeDeckId: null,
@@ -924,7 +927,9 @@ function lifeCounterHTML(){
       <div class="pc-group"><span class="pc-lbl">Players</span>${[2,3,4].map(n=>`<button class="pc-btn ${p.count===n?'on':''}" onclick="setPlayers(${n})">${n}</button>`).join('')}</div>
       <div class="pc-group"><span class="pc-lbl">Life</span>${[20,40].map(s=>`<button class="pc-btn ${p.start===s?'on':''}" onclick="setStart(${s})">${s}</button>`).join('')}</div>
       <button class="btn sm" onclick="resetLife()">↺ Reset</button>
-      <button class="btn sm ${state.session?'gold':''}" onclick="openShare()">🔗 ${state.session?'Room '+state.session.code:'Share'}</button>
+      ${state.session
+        ? `<button class="btn sm gold" onclick="openShare()">🔗 Room ${state.session.code}</button>`
+        : `<button class="btn sm" onclick="openShare()">🤝 Play with friends</button><button class="btn sm" onclick="startMatchmaking()">🎯 Matchmaking</button>`}
     </div>`;
   for(let i=0;i<p.count;i++){
     const v=p.life[i]; const col=PLAY_COLORS[i]; const out=playOut(i);
@@ -1472,6 +1477,50 @@ function publishState(){ const s=state.session; if(s&&s.client&&s.status==='conn
 function leaveSession(){ const s=state.session; if(s){ try{ s.client.end(true); }catch(e){} } state.session=null; closeModal(); render(); }
 function shareUrl(){ return location.origin+location.pathname+'?room='+(state.session?state.session.code:''); }
 function openShare(){ showShareModal(); }
+// ---------- Matchmaking: pair with a random person also searching (free public broker) ----------
+const LOBBY_TOPIC='planardeckbox/lobby/v1';
+function startMatchmaking(){
+  loadMqtt().then(()=>{
+    if(state.session){ try{ state.session.client.end(true); }catch(e){} state.session=null; }
+    if(state.matchmaking){ stopMatchmakingClient(); }
+    const me=Math.random().toString(36).slice(2,10);
+    const client=mqtt.connect('wss://broker.emqx.io:8084/mqtt',{clientId:'pdbmm_'+me,reconnectPeriod:3000,connectTimeout:9000});
+    state.matchmaking={me,client,status:'connecting',matched:false,timer:null};
+    state.tab='play'; state.play.mode='life';
+    showMatchModal();
+    const seek=()=>{ const mm=state.matchmaking; if(mm&&!mm.matched){ try{ client.publish(LOBBY_TOPIC, JSON.stringify({t:'seek',from:me})); }catch(e){} } };
+    client.on('connect',()=>{ const mm=state.matchmaking; if(!mm) return; mm.status='searching'; client.subscribe(LOBBY_TOPIC); seek(); mm.timer=setInterval(seek, 2500); if($('#matchBody')) showMatchModal(); });
+    client.on('message',(t,payload)=>{
+      const mm=state.matchmaking; if(!mm||mm.matched) return;
+      let d; try{ d=JSON.parse(payload.toString()); }catch(e){ return; }
+      if(d.t==='seek' && d.from && d.from!==me){
+        // deterministic host: the lower id makes the room and invites the other
+        if(me<d.from){
+          mm.matched=true; if(mm.timer) clearInterval(mm.timer);
+          const room=genCode();
+          client.publish(LOBBY_TOPIC, JSON.stringify({t:'match',a:me,b:d.from,room}), {qos:0}, ()=>{ stopMatchmakingClient(); joinRoom(room); toast('🎯 Opponent found — room '+room); });
+        }
+      } else if(d.t==='match' && (d.a===me||d.b===me)){
+        mm.matched=true; if(mm.timer) clearInterval(mm.timer);
+        const room=d.room; stopMatchmakingClient(); joinRoom(room); toast('🎯 Opponent found — room '+room);
+      }
+    });
+    client.on('error',()=>{ const mm=state.matchmaking; if(mm){ mm.status='error'; if($('#matchBody')) showMatchModal(); } });
+  }).catch(()=>toast('Could not load matchmaking'));
+}
+function stopMatchmakingClient(){ const mm=state.matchmaking; if(mm){ if(mm.timer) clearInterval(mm.timer); try{ mm.client.end(true); }catch(e){} } state.matchmaking=null; }
+function cancelMatchmaking(){ stopMatchmakingClient(); closeModal(); render(); toast('Matchmaking cancelled'); }
+function showMatchModal(){
+  const mm=state.matchmaking; const st=mm?mm.status:'';
+  const body = st==='error'
+    ? `<div style="color:var(--danger);font-weight:700;margin:10px 0">Couldn’t reach the matchmaking server — try again.</div>`
+    : `<div style="text-align:center;padding:8px 0">
+        <div class="mm-spin"></div>
+        <div style="font-weight:700;margin-top:12px">${st==='searching'?'Searching for an opponent…':'Connecting…'}</div>
+        <p class="tiny muted" style="margin:8px 4px 0">You’ll be paired with another player who’s also searching, into a shared life counter. Keep this open.</p>
+      </div>`;
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>🎯 Matchmaking</h3><div id="matchBody">${body}</div><button class="btn ghost full" style="margin-top:12px" onclick="cancelMatchmaking()">Cancel</button></div></div>`;
+}
 function showShareModal(){
   const s=state.session; let inner;
   if(!s){
@@ -2205,7 +2254,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
   setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,cancelTarget,applyTargetOpponent,applyTargetTo,lethalDamage,
-  openShare,joinRoom,leaveSession,copyShare});
+  openShare,joinRoom,leaveSession,copyShare,startMatchmaking,cancelMatchmaking});
 
 render();
 initFirebase();
