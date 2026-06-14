@@ -2333,8 +2333,18 @@ updateAccountUI();
 window.addEventListener('load',()=>{ if(!isStandalone()){ const b=$('#installBtn'); if(b) b.classList.remove('hidden'); } });
 
 // Register service worker so the app installs to the home screen and works offline.
+// Auto-update: when a newer service worker takes control, reload once so new features show
+// without the user having to close/reopen the installed app.
 if('serviceWorker' in navigator){
-  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+  let _swReloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(_swReloaded) return; _swReloaded=true; location.reload(); });
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').then(reg=>{
+      reg.update();
+      setInterval(()=>{ reg.update().catch(()=>{}); }, 60000); // check for a new version every minute
+      // when an update is found, the new SW (skipWaiting in sw.js) activates and claims → controllerchange reloads
+    }).catch(()=>{});
+  });
 }
 </script>
 </body>
