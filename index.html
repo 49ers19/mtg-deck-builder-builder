@@ -710,11 +710,15 @@ function renderCollection(){
       <div class="stat"><div class="v">${unique}</div><div class="l">Unique</div></div>
       <div class="stat"><div class="v">$${totalVal.toFixed(0)}</div><div class="l">Est. Value</div></div>
     </div>
-    <button class="btn gold full" style="margin-bottom:12px" onclick="openScanner()">📷 Scan a card</button>`;
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn gold" style="flex:1" onclick="openScanner()">📷 Scan</button>
+      <button class="btn" style="flex:1" onclick="openPasteCollection()">📋 Paste cards</button>
+    </div>`;
   if(!ids.length){
     h += `<div class="empty"><div class="big">📚</div><div class="t">Empty collection</div>
-      <div class="tiny">Add cards you own from the Search tab.</div>
-      <button class="btn gold full" style="margin-top:16px" onclick="setTab('search')">🔍 Add cards</button></div>`;
+      <div class="tiny">Paste a list, scan cards, or add them from Search.</div>
+      <button class="btn gold full" style="margin-top:16px" onclick="openPasteCollection()">📋 Paste a list of cards</button>
+      <button class="btn full" style="margin-top:8px" onclick="setTab('search')">🔍 Add from Search</button></div>`;
   } else {
     const sel=(key,opts,label)=>`<select class="filt" onchange="setCollFilter('${key}',this.value)"><option value="">${label}</option>${opts.map(([v,t])=>`<option value="${v}" ${f[key]===v?'selected':''}>${t}</option>`).join('')}</select>`;
     const active = f.q||f.type||f.color||f.cmc!==''||f.rarity;
@@ -1912,6 +1916,36 @@ async function loadPrecon(i){
   if(deck){ closeModal(); render(); }
 }
 
+function openPasteCollection(){
+  modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <h3>Paste cards to your collection</h3>
+      <div class="field"><label>One card per line — quantities optional (e.g. “4 Llanowar Elves”)</label>
+        <textarea id="pasteCollText" class="imp-text" placeholder="4 Llanowar Elves&#10;1 Sol Ring&#10;2 Counterspell&#10;..." autocomplete="off"></textarea></div>
+      <div id="pasteCollStatus" class="tiny muted" style="margin-bottom:10px"></div>
+      <button class="btn gold full" onclick="runPasteCollection()">Add to collection</button>
+      <button class="btn ghost full" style="margin-top:7px" onclick="closeModal()">Cancel</button>
+    </div></div>`;
+  setTimeout(()=>{ const t=$('#pasteCollText'); if(t) t.focus(); },60);
+}
+async function runPasteCollection(){
+  const text=($('#pasteCollText')&&$('#pasteCollText').value)||'';
+  const statusEl=$('#pasteCollStatus');
+  const parsed=parseDeckList(text);
+  const lines=parsed.cards.slice();
+  if(parsed.commanderName) lines.push({qty:1,name:parsed.commanderName});
+  if(!lines.length){ if(statusEl) statusEl.textContent='Nothing to add — paste some cards first.'; return; }
+  const unique=[...new Set(lines.map(l=>l.name))];
+  if(statusEl) statusEl.innerHTML='<span class="mini-spin"></span> Looking up '+unique.length+' cards…';
+  const {found}=await scryCollection(unique);
+  const norm=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'');
+  const map={}; found.forEach(c=>{ map[norm(c.name)]=c; if(c.name.includes('//')) map[norm(c.name.split('//')[0])]=c; });
+  let added=0; const missing=[];
+  lines.forEach(({qty,name})=>{ const c=map[norm(name)]; if(c){ cacheCard(c); state.collection[c.id]=(state.collection[c.id]||0)+qty; added+=qty; } else missing.push(name); });
+  DB.save(); closeModal(); render();
+  toast(missing.length ? added+' cards added · '+missing.length+' not found' : added+' cards added to collection');
+}
+
 function deckQty(deckId,cardId,delta){
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
   if(delta>0 && singletonBlocked(null,cardId,d)){ toast('Singleton format — only one copy (basics excepted)'); return; }
@@ -2321,7 +2355,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,scanAdd,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
-  openImport,runImport,loadPrecon,
+  openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,
   setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,installApp,
   startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
