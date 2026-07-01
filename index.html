@@ -1480,7 +1480,7 @@ function renderGame(){
 function loadMqtt(){ if(window.mqtt) return Promise.resolve(); return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://unpkg.com/mqtt/dist/mqtt.min.js'; s.onload=()=>res(); s.onerror=()=>rej(new Error('mqtt load')); document.head.appendChild(s); }); }
 function genCode(){ let c=''; const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; for(let i=0;i<4;i++) c+=A[Math.floor(Math.random()*A.length)]; return c; }
 function roomTopic(code){ return 'planardeckbox/v1/'+code.toUpperCase(); }
-async function joinRoom(code){
+async function joinRoom(code, silent){
   code=(code||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);
   if(code.length<4){ toast('Enter a 4-character code'); return; }
   try{ await loadMqtt(); }catch(e){ toast('Could not load sharing'); return; }
@@ -1489,8 +1489,9 @@ async function joinRoom(code){
   const client=mqtt.connect('wss://broker.emqx.io:8084/mqtt',{clientId:'pdbx_'+sender,reconnectPeriod:3000,connectTimeout:9000});
   state.session={code,client,sender,status:'connecting'};
   state.tab='play'; state.play.mode='life';
-  showShareModal();
-  client.on('connect',()=>{ state.session.status='connected'; client.subscribe(roomTopic(code)); publishState(); if($('#shareBody')) showShareModal(); if(state.tab==='play'&&!state.game) renderPlay(); });
+  if(!silent) showShareModal();
+  else if(state.tab==='play'&&!state.game) renderPlay();
+  client.on('connect',()=>{ state.session.status='connected'; client.subscribe(roomTopic(code)); publishState(); if(!silent && $('#shareBody')) showShareModal(); if(state.tab==='play'&&!state.game) renderPlay(); });
   client.on('message',(t,payload)=>{ try{ const d=JSON.parse(payload.toString()); if(!state.session||d.sender===state.session.sender) return; if(d.play){ state.play=d.play; if(state.tab==='play'&&!state.game) renderPlay(); } }catch(e){} });
   client.on('error',()=>{ if(state.session){ state.session.status='error'; if($('#shareBody')) showShareModal(); } });
   client.on('close',()=>{ if(state.session&&state.session.status==='connected') state.session.status='reconnecting'; });
@@ -1521,17 +1522,19 @@ function startMatchmaking(){
         if(me<d.from){
           mm.matched=true; if(mm.timer) clearInterval(mm.timer);
           const room=genCode();
-          client.publish(LOBBY_TOPIC, JSON.stringify({t:'match',a:me,b:d.from,room}), {qos:0}, ()=>{ stopMatchmakingClient(); joinRoom(room); toast('🎯 Opponent found — room '+room); });
+          client.publish(LOBBY_TOPIC, JSON.stringify({t:'match',a:me,b:d.from,room}), {qos:0}, ()=>{ stopMatchmakingClient(); enterMatchedGame(room); });
         }
       } else if(d.t==='match' && (d.a===me||d.b===me)){
         mm.matched=true; if(mm.timer) clearInterval(mm.timer);
-        const room=d.room; stopMatchmakingClient(); joinRoom(room); toast('🎯 Opponent found — room '+room);
+        const room=d.room; stopMatchmakingClient(); enterMatchedGame(room);
       }
     });
     client.on('error',()=>{ const mm=state.matchmaking; if(mm){ mm.status='error'; if($('#matchBody')) showMatchModal(); } });
   }).catch(()=>toast('Could not load matchmaking'));
 }
 function stopMatchmakingClient(){ const mm=state.matchmaking; if(mm){ if(mm.timer) clearInterval(mm.timer); try{ mm.client.end(true); }catch(e){} } state.matchmaking=null; }
+// Matched → drop straight into the shared game (no QR / share step)
+function enterMatchedGame(room){ closeModal(); state.tab='play'; state.game=null; joinRoom(room, true); render(); toast('🎯 Opponent found — game on!'); }
 function cancelMatchmaking(){ stopMatchmakingClient(); closeModal(); render(); toast('Matchmaking cancelled'); }
 function showMatchModal(){
   const mm=state.matchmaking; const st=mm?mm.status:'';
@@ -1540,7 +1543,7 @@ function showMatchModal(){
     : `<div style="text-align:center;padding:8px 0">
         <div class="mm-spin"></div>
         <div style="font-weight:700;margin-top:12px">${st==='searching'?'Searching for an opponent…':'Connecting…'}</div>
-        <p class="tiny muted" style="margin:8px 4px 0">You’ll be paired with another player who’s also searching, into a shared life counter. Keep this open.</p>
+        <p class="tiny muted" style="margin:8px 4px 0">You’ll be paired with another player who’s also searching and dropped straight into a shared game — no codes to scan. Keep this open.</p>
       </div>`;
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>🎯 Matchmaking</h3><div id="matchBody">${body}</div><button class="btn ghost full" style="margin-top:12px" onclick="cancelMatchmaking()">Cancel</button></div></div>`;
 }
