@@ -1798,6 +1798,8 @@ function openImport(){
   modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
     <div class="modal">
       <h3>Load or import a deck</h3>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text);margin-bottom:14px;cursor:pointer;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:11px 12px">
+        <input type="checkbox" id="impToColl" style="width:17px;height:17px;accent-color:var(--accent);flex:none"> Also add all cards to my collection</label>
       <div class="field"><label>Load an official precon</label>
         <input id="preconSearch" class="scan-input" placeholder="Search 180+ precons by name…" autocomplete="off">
         <div id="preconList" class="precon-list"><div class="tiny muted" style="padding:9px">Loading precons…</div></div>
@@ -1861,7 +1863,7 @@ async function scryCollection(names){
   return {found,notFound};
 }
 
-async function importList(name, format, text, statusEl){
+async function importList(name, format, text, statusEl, toCollection){
   const parsed=parseDeckList(text);
   const names=parsed.cards.map(c=>c.name);
   if(parsed.commanderName) names.push(parsed.commanderName);
@@ -1884,21 +1886,29 @@ async function importList(name, format, text, statusEl){
     if(c){ cacheCard(c); deck.commander=c.id; delete deck.cards[c.id]; }
     else missing.push(parsed.commanderName+' (commander)');
   }
+  let collAdded=0;
+  if(toCollection){
+    for(const cid in deck.cards){ const need=deck.cards[cid]; if((state.collection[cid]||0)<need){ collAdded+=need-(state.collection[cid]||0); state.collection[cid]=need; } }
+    if(deck.commander && (state.collection[deck.commander]||0)<1){ state.collection[deck.commander]=1; collAdded++; }
+  }
   state.decks.push(deck); state.openDeckId=id; DB.save();
-  toast(missing.length ? added+' cards in · '+missing.length+' not found' : added+' cards imported');
+  const base = missing.length ? added+' cards in · '+missing.length+' not found' : added+' cards imported';
+  toast(toCollection ? base+' · '+collAdded+' added to collection' : base);
   return deck;
 }
 async function runImport(){
   const text=($('#impText')&&$('#impText').value)||'';
   const name=($('#impName')&&$('#impName').value.trim())||'Imported Deck';
   const format=($('#impFormat')&&$('#impFormat').value)||'Casual';
-  const deck=await importList(name, format, text, $('#impStatus'));
+  const toColl=!!($('#impToColl')&&$('#impToColl').checked);
+  const deck=await importList(name, format, text, $('#impStatus'), toColl);
   if(deck){ closeModal(); render(); }
 }
 async function loadPrecon(i){
   const p=PRECONS[i]; if(!p) return;
   const status=$('#impStatus');
-  const deck=await importList(p.name, 'Commander', p.list, status);
+  const toColl=!!($('#impToColl')&&$('#impToColl').checked);
+  const deck=await importList(p.name, 'Commander', p.list, status, toColl);
   if(deck){ closeModal(); render(); }
 }
 
