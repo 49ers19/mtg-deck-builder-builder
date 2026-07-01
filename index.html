@@ -378,6 +378,7 @@ const state = {
   collFilter: { q:'', type:'', color:'', cmc:'', rarity:'' },
   analyzeDeckId: null,
   analyzeRecs: {},
+  analyzeOwnedOnly: false,
   user: null,
 };
 
@@ -776,6 +777,7 @@ function renderCollection(){
 // ---------- ANALYZE ----------
 function selectAnalyzeDeck(id){ state.analyzeDeckId=id; render(); const d=state.decks.find(x=>x.id===id); if(d){ enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[])); if(!state.analyzeRecs[id]) fetchRecs(d); } }
 function closeAnalyze(){ state.analyzeDeckId=null; render(); }
+function setAnalyzeOwned(v){ state.analyzeOwnedOnly=!!v; renderAnalyze(); }
 function slugify(name){ return name.toLowerCase().normalize('NFD').replace(/[^a-z0-9 ]/g,'').trim().replace(/\s+/g,'-'); }
 async function scryfallFallbackRecs(cmd, have){
   const ci=(cmd.ci&&cmd.ci.length?cmd.ci:cmd.colors)||[];
@@ -1007,12 +1009,18 @@ function renderAnalyze(){
   else if(!rec.cards||!rec.cards.length) h+=`<div class="tiny muted">No recommendations found.</div>`;
   else {
     state._resultMap=state._resultMap||{}; rec.cards.forEach(c=>state._resultMap[c.id]=c);
+    const owned=!!state.analyzeOwnedOnly;
     const withCats=rec.cards.map(c=>({c, fills:cardCategories(c).filter(x=>weakKeys.includes(x))}));
     withCats.sort((a,b)=>(b.fills.length>0)-(a.fills.length>0));
-    h+=`<div class="tiny muted" style="margin-bottom:8px">Popular cards for ${esc(cmd.name)} (via EDHREC) — ones that fix a weakness are first. Tap ＋ to add.</div>`;
-    withCats.forEach(({c,fills})=>{ const inDeck=d.cards[c.id]||0; const thumb=(c.image_uris&&c.image_uris.small)||((c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small))||'';
+    const ownedList=withCats.filter(({c})=>(state.collection[c.id]||0)>0);
+    const shown = owned ? ownedList : withCats;
+    h+=`<div class="pc-group" style="margin-bottom:10px"><button class="pc-btn ${owned?'':'on'}" onclick="setAnalyzeOwned(false)">Any card</button><button class="pc-btn ${owned?'on':''}" onclick="setAnalyzeOwned(true)">In my collection (${ownedList.length})</button></div>`;
+    h+=`<div class="tiny muted" style="margin-bottom:8px">${owned?'Recommended cards you already own':'Popular cards for '+esc(cmd.name)+' (via EDHREC)'} — ones that fix a weakness are first. Tap ＋ to add.</div>`;
+    if(!shown.length) h+=`<div class="tiny muted">${owned?'None of the recommended cards are in your collection yet — switch to “Any card” to see them all.':'No recommendations found.'}</div>`;
+    shown.forEach(({c,fills})=>{ const inDeck=d.cards[c.id]||0; const ownedN=state.collection[c.id]||0; const thumb=(c.image_uris&&c.image_uris.small)||((c.card_faces&&c.card_faces[0].image_uris&&c.card_faces[0].image_uris.small))||'';
       const tag = inDeck ? ' · <span style="color:var(--accent2)">in deck</span>' : (fills.length?` · <span style="color:var(--accent2)">fixes ${fills.join('/')}</span>`:'');
-      h+=`<div class="cardrow"><div class="thumb" style="background-image:url('${thumb}')" onclick="showCardObj(${esc(JSON.stringify(c.id))})"></div><div class="info"><div class="nm">${esc(c.name)}</div><div class="meta">${esc(shortType(c.type_line))}${tag}</div></div><button class="btn gold sm" onclick="addToDeckDirect('${d.id}','${c.id}')">＋</button></div>`; });
+      const ownTag = ownedN ? ` · <span style="color:var(--ok)">✓ owned${ownedN>1?' '+ownedN:''}</span>` : '';
+      h+=`<div class="cardrow"><div class="thumb" style="background-image:url('${thumb}')" onclick="showCardObj(${esc(JSON.stringify(c.id))})"></div><div class="info"><div class="nm">${esc(c.name)}</div><div class="meta">${esc(shortType(c.type_line))}${tag}${ownTag}</div></div><button class="btn gold sm" onclick="addToDeckDirect('${d.id}','${c.id}')">＋</button></div>`; });
   }
   h+=`</div>`;
   main.innerHTML=h;
@@ -2654,7 +2662,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,openBgPicker,setBg,
-  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,installApp,
+  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,installApp,
   startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
