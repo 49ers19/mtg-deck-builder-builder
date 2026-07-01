@@ -952,7 +952,7 @@ function lifeCounterHTML(){
       <button class="btn sm" onclick="resetLife()">↺ Reset</button>
       ${state.session
         ? `<button class="btn sm gold" onclick="openShare()">🔗 Room ${state.session.code}</button>`
-        : `<button class="btn sm" onclick="openShare()">🤝 Play with friends</button><button class="btn sm gold" onclick="setPlayMode('play')">🎯 Quick play</button>`}
+        : `<button class="btn sm" onclick="openShare()">🤝 Play with friends</button><button class="btn sm gold" onclick="setPlayMode('play')">🎯 Matchmaking</button>`}
     </div>`;
   for(let i=0;i<p.count;i++){
     const v=p.life[i]; const col=PLAY_COLORS[i]; const out=playOut(i);
