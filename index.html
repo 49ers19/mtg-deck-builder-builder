@@ -1662,7 +1662,7 @@ function initMatch(isHost){
     me:{ deck:null, cmd:null, life:40, hand:[], _lib:[], board:[], gy:[], exile:[], libCount:0, ready:false,
          pool:emptyPool(), landsThisTurn:0, phase:0, cmdZone:true, cmdTax:0, cmdDmg:0, firstTurnTaken:false },
     opp:{ deck:null, cmd:null, life:40, board:[], gy:[], exile:[], handCount:0, libCount:0, ready:false, cmdDmg:0, cmdZone:true, cmdTax:0 },
-    diceHost:null, diceGuest:null, firstHost:null, turnHost:null, rolling:false, choice:null, incoming:null };
+    diceHost:null, diceGuest:null, firstHost:null, turnHost:null, rolling:false, choice:null, pending:null, respond:null };
 }
 function seatPayload(){ const m=state.match.me; return { deck:m.deck, cmd:m.cmd, life:m.life, handCount:m.hand.length, libCount:m.libCount, gy:m.gy.slice(), exile:m.exile.slice(), board:m.board.map(c=>({cardId:c.cardId,tapped:!!c.tapped,token:c.token||null,sick:!!c.sick,atk:!!c.atk})), ready:m.ready, cmdDmg:m.cmdDmg, cmdZone:m.cmdZone, cmdTax:m.cmdTax }; }
 // mana-pool math on a given pool object
@@ -1692,7 +1692,7 @@ function maybeAdvanceMatch(){ const M=state.match; if(!M||!M.amHost) return; if(
 function matchPickDeck(deckId){
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
   const lib=[]; for(const cid in d.cards){ for(let k=0;k<d.cards[cid];k++) lib.push(cid); } shuffle(lib);
-  const m=state.match.me; m.deck=d.name; m.cmd=d.commander||null; m.life=40; m.board=[]; m.gy=[]; m.exile=[]; state.match.choice=null; state.match.incoming=null;
+  const m=state.match.me; m.deck=d.name; m.cmd=d.commander||null; m.life=40; m.board=[]; m.gy=[]; m.exile=[]; state.match.choice=null; state.match.pending=null; state.match.respond=null;
   m.pool=emptyPool(); m.landsThisTurn=0; m.phase=0; m.cmdZone=true; m.cmdTax=0; m.cmdDmg=0; m.firstTurnTaken=false;
   m._lib=lib; m.hand=[]; for(let i=0;i<7 && m._lib.length;i++) m.hand.push(m._lib.shift()); m.libCount=m._lib.length; m.ready=true;
   enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[]));
@@ -1705,21 +1705,35 @@ function matchPlay(idx){
   if(isLandCard(cd)){
     if(m.landsThisTurn>=1){ toast('Only one land per turn'); return; }
     m.hand.splice(idx,1); m.board.push({iid:uid(),cardId:cid,tapped:false,sick:false}); m.landsThisTurn++;
+    publishMatch(); renderPlay();
   } else {
     if(/\{X\}/i.test(cd&&cd.mana_cost||'')){ matchPromptX(idx); return; }
     const need=parseCost(cd&&cd.mana_cost);
     if(!poolCanPay(m.pool,need)){ toast('Not enough mana — need '+(manaText(cd&&cd.mana_cost)||'?')+'. Tap lands for mana first.'); return; }
-    poolPay(m.pool,need);
-    m.hand.splice(idx,1); m.board.push({iid:uid(),cardId:cid,tapped:false,sick:isCreatureType(cd)});
-    matchResolveEffects(cid);
+    poolPay(m.pool,need); m.hand.splice(idx,1);
+    matchPutOnStack(cid, 0);
   }
-  publishMatch(); renderPlay();
 }
 function matchPromptX(idx){ const m=state.match.me,cid=m.hand[idx],cd=card(cid); const avail=poolTotal(m.pool);
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Cast ${cd?esc(cd.name):'spell'} — choose X</h3><div class="tiny muted" style="margin-bottom:8px">Cost ${manaText(cd&&cd.mana_cost)||''} · you have ${avail} mana in your pool.</div><div class="row" style="gap:6px;flex-wrap:wrap">${[0,1,2,3,4,5,6,8,10].map(x=>`<button class="btn sm" onclick="matchPlayX(${idx},${x})">X=${x}</button>`).join('')}</div><button class="btn ghost full" style="margin-top:10px" onclick="closeModal()">Cancel</button></div></div>`; }
 function matchPlayX(idx,x){ closeModal(); const m=state.match.me,cid=m.hand[idx],cd=card(cid); if(cid==null) return; const need=parseCost(cd&&cd.mana_cost); need.generic+=Math.max(0,x||0);
   if(!poolCanPay(m.pool,need)){ toast('Not enough mana for X='+x+' — need '+(need.generic)+' generic + colors'); return; }
-  poolPay(m.pool,need); m.hand.splice(idx,1); m.board.push({iid:uid(),cardId:cid,tapped:false,sick:isCreatureType(cd),xval:x}); matchResolveEffects(cid); publishMatch(); renderPlay(); }
+  poolPay(m.pool,need); m.hand.splice(idx,1); matchPutOnStack(cid, x); }
+// ---- the stack: instant-speed response window ----
+function matchPutOnStack(cid, xval){ const M=state.match, cd=card(cid); M.pending={cid, xval:xval||0, name:cd?cd.name:'Spell'};
+  const s=state.session; if(s&&s.client){ try{ s.client.publish(roomTopic(s.code), JSON.stringify({sender:s.sender, matchEvent:{type:'cast', cardId:cid, name:(cd?cd.name:'a spell'), x:xval||0}})); }catch(e){} }
+  publishMatch(); renderPlay(); toast('⏳ '+(cd?cd.name:'Spell')+' on the stack — opponent may respond'); }
+function matchResolveSpell(){ const M=state.match, p=M.pending, m=M.me; if(!p) return; const cd=card(p.cid); const perm=cd && !/\b(instant|sorcery)\b/i.test(cd.type_line||''); M.pending=null;
+  if(perm){ m.board.push({iid:uid(),cardId:p.cid,tapped:false,sick:isCreatureType(cd)}); }
+  matchResolveEffects(p.cid); if(!perm){ m.gy.push(p.cid); }
+  publishMatch(); renderPlay(); toast((cd?cd.name:'Spell')+' resolves'); }
+function matchRespondPass(){ const s=state.session; if(s&&s.client){ try{ s.client.publish(roomTopic(s.code), JSON.stringify({sender:s.sender, matchEvent:{type:'pass'}})); }catch(e){} } state.match.respond=null; renderPlay(); toast('Passed — their spell resolves'); }
+function matchRespondInstant(){ const m=state.match.me; const opts=m.hand.map((cid,i)=>({cid,i})).filter(o=>/instant/i.test((card(o.cid)||{}).type_line||'')); if(!opts.length){ toast('No instants in hand to respond with'); return; }
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Respond with an instant</h3>${opts.map(o=>{ const cd=card(o.cid); return `<button class="btn full" style="margin-bottom:6px" onclick="matchCastResponse(${o.i})">${esc(cd.name)} <span class="tiny muted">${manaText(cd.mana_cost)||''}</span></button>`; }).join('')}<button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div>`; }
+function matchCastResponse(i){ closeModal(); const M=state.match, m=M.me; const cid=m.hand[i], cd=card(cid); if(!cd) return; const need=parseCost(cd.mana_cost); if(!poolCanPay(m.pool,need)){ toast('Not enough mana to cast '+cd.name); return; }
+  poolPay(m.pool,need); m.hand.splice(i,1); m.gy.push(cid); const isCounter=/counter target spell/i.test(cd.text||''); matchResolveEffects(cid); M.respond=null;
+  const s=state.session; if(s&&s.client){ try{ s.client.publish(roomTopic(s.code), JSON.stringify({sender:s.sender, matchEvent:{type: isCounter?'counter':'pass'}})); }catch(e){} }
+  publishMatch(); renderPlay(); toast(isCounter?'🚫 Countered their spell!':cd.name+' resolves — their spell still resolves'); }
 function matchLife(delta){ const m=state.match.me; m.life+=delta; publishMatch(); renderPlay(); }
 function cardHasAbility(cd){ return !!(cd && /return [^.]*from (?:your|a) graveyard to (?:your hand|the battlefield)|(?:cast|play) [^.]*from your hand without paying|put [^.]*from your hand onto the battlefield/i.test(cd.text||'')); }
 function matchBoardMenu(iid){ const M=state.match,m=M.me,c=m.board.find(x=>x.iid===iid); if(!c) return; const cd=card(c.cardId); const nm=cd?esc(cd.name):(c.token?esc(c.token)+' token':'Card');
@@ -1782,10 +1796,12 @@ function matchCmdToZone(iid){ const m=state.match.me; if(m.board.some(x=>x.iid==
 // ---- combat with keywords ----
 function kw(cd){ const has=w=>new RegExp('(^|[\\n,.;( ])'+w+'([\\n,.;) ]|$)','i').test((cd&&cd.text)||''); return {
   flying:has('flying'), reach:has('reach'), firststrike:has('first strike'), doublestrike:has('double strike'),
-  deathtouch:has('deathtouch'), trample:has('trample'), menace:has('menace'), vigilance:has('vigilance'), lifelink:has('lifelink') }; }
+  deathtouch:has('deathtouch'), trample:has('trample'), menace:has('menace'), vigilance:has('vigilance'), lifelink:has('lifelink'),
+  indestructible:has('indestructible'), defender:has('defender'), unblockable:/can[’']?t be blocked/i.test((cd&&cd.text)||'') }; }
 function toughOf(cd){ return parseInt(cd&&cd.toughness,10)||1; }
 function matchToggleAttacker(iid){ const M=state.match,m=M.me; const c=m.board.find(x=>x.iid===iid); if(!c) return; const cd=card(c.cardId);
   if(!isCreatureType(cd)){ toast('Only creatures can attack'); return; }
+  if(kw(cd).defender){ toast('Defender — this creature can’t attack'); return; }
   if(c.sick){ toast('💤 Summoning sick — can’t attack this turn'); return; }
   if(!c.atk && c.tapped){ toast('Tapped creatures can’t attack'); return; }
   c.atk=!c.atk; if(!kw(cd).vigilance) c.tapped=c.atk; publishMatch(); renderPlay(); }
@@ -1800,7 +1816,10 @@ function applyMatchEvent(d){ const M=state.match; if(!M||!d.matchEvent) return; 
     (e.deadAttackers||[]).forEach(iid=>{ const c=m.board.find(x=>x.iid===iid); if(c){ if(!c.token&&c.cardId!=null){ if(c.isCmd||c.cardId===m.cmd) m.cmdZone=true; else m.gy.push(c.cardId); } m.board=m.board.filter(x=>x.iid!==iid); } });
     if(e.attackerLifelink) m.life+=e.attackerLifelink;
     publishMatch(); renderPlay(); toast('Combat resolved'+(e.attackerLifelink?' · +'+e.attackerLifelink+' lifelink':'')); }
-  else if(e.type==='removal'){ matchApplyRemoval(e); } }
+  else if(e.type==='removal'){ matchApplyRemoval(e); }
+  else if(e.type==='cast'){ M.respond={cardId:e.cardId, name:e.name||'a spell', x:e.x||0}; toast('🪄 Opponent cast '+(e.name||'a spell')+' — respond or pass'); renderPlay(); }
+  else if(e.type==='pass'){ matchResolveSpell(); }
+  else if(e.type==='counter'){ const p=M.pending; if(p){ M.me.gy.push(p.cid); M.pending=null; publishMatch(); renderPlay(); toast('🚫 Your '+(card(p.cid)?card(p.cid).name:'spell')+' was countered!'); } } }
 function matchBlockMenu(blockerIid){ const M=state.match,B=M.blocking,m=M.me; if(!B) return; const c=m.board.find(x=>x.iid===blockerIid); if(!c) return; if(c.tapped){ toast('Tapped creatures can’t block'); return; } const cd=card(c.cardId); if(!isCreatureType(cd)){ toast('Only creatures block'); return; } const bk=kw(cd);
   const opts=B.attackers.map((a,i)=>{ const canBlock=!a.kw.flying||bk.flying||bk.reach; return canBlock?`<button class="btn full" style="margin-top:6px" onclick="matchSetBlock('${blockerIid}',${i})">Block ${esc(a.name)} (${a.pow}/${a.tou})</button>`:''; }).join('');
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>${esc(cd.name)} blocks…</h3>${opts||'<div class="tiny muted">No legal target — flyers need flying or reach.</div>'}<button class="btn full" style="margin-top:6px" onclick="matchSetBlock('${blockerIid}',-1)">Don’t block</button><button class="btn ghost full" style="margin-top:6px" onclick="closeModal()">Close</button></div></div>`; }
@@ -1813,7 +1832,7 @@ function matchResolveBlocks(){
   B.attackers.forEach((a,i)=>{
     const blockers=(byAtk[i]||[]).map(bid=>m.board.find(x=>x.iid===bid)).filter(Boolean);
     const aStrike=a.kw.doublestrike?2:1, pw=a.pow*aStrike;
-    const blocked = blockers.length && !(a.kw.menace && blockers.length<2);
+    const blocked = !a.kw.unblockable && blockers.length && !(a.kw.menace && blockers.length<2);
     if(!blocked){ faceDmg+=pw; if(a.isCmd) cmdDmg+=pw; if(a.kw.lifelink) atkLifelink+=pw; return; }
     // blockers deal to attacker (a blocker killed first by attacker's first/double strike deals nothing back)
     let dmgToAtk=0, blockerDT=false;
@@ -1823,10 +1842,10 @@ function matchResolveBlocks(){
       if(!killedFirst){ dmgToAtk+=bp*bStrike; if(bk.deathtouch&&bp>0) blockerDT=true; if(bk.lifelink) myLifelink+=bp*bStrike; } });
     // attacker assigns lethal to each blocker in order; trample overflows to face
     let remaining=pw;
-    blockers.forEach(b=>{ const bcd=card(b.cardId); const need=a.kw.deathtouch?1:toughOf(bcd); const give=Math.min(remaining,need); remaining-=give; if((a.kw.deathtouch&&give>0)||give>=toughOf(bcd)) deadBlockers.push(b.iid); });
+    blockers.forEach(b=>{ const bcd=card(b.cardId); const need=a.kw.deathtouch?1:toughOf(bcd); const give=Math.min(remaining,need); remaining-=give; if(((a.kw.deathtouch&&give>0)||give>=toughOf(bcd)) && !kw(bcd).indestructible) deadBlockers.push(b.iid); });
     if(a.kw.trample && remaining>0){ faceDmg+=remaining; if(a.isCmd) cmdDmg+=remaining; }
     if(a.kw.lifelink) atkLifelink+=pw; // a blocked creature deals all its power
-    if((blockerDT&&dmgToAtk>0) || dmgToAtk>=a.tou) deadAttackers.push(a.iid);
+    if(((blockerDT&&dmgToAtk>0) || dmgToAtk>=a.tou) && !a.kw.indestructible) deadAttackers.push(a.iid);
   });
   m.life-=faceDmg; m.cmdDmg+=cmdDmg; m.life+=myLifelink;
   deadBlockers.forEach(bid=>{ const c=m.board.find(x=>x.iid===bid); if(c){ if(!c.token&&c.cardId!=null){ if(c.isCmd||c.cardId===m.cmd) m.cmdZone=true; else m.gy.push(c.cardId); } m.board=m.board.filter(x=>x.iid!==bid); } });
@@ -1931,6 +1950,9 @@ function matchPlayHTML(){
     if(M.choice.zone!=='hand'){ const board=M.choice.zone==='oppboard'; const arr=M.choice.zone==='gy'?me.gy:board?(M.opp.board||[]):me.exile; cards=`<div class="mhand">`+(arr.map((it,i)=>{ const cid=board?it.cardId:it; const cd=card(cid),th=cd?(cd.thumb||''):''; return `<button class="mhcard glow" style="background-image:url('${th}')" title="${cd?esc(cd.name):''}" onclick="matchPickChoice(${i})"></button>`; }).join('')||'<div class="tiny muted" style="padding:8px">No targets</div>')+`</div>`; }
     choiceBar=`<div class="choicebar"><div class="cb-top"><span>✨ ${esc(M.choice.prompt)}</span><button class="btn sm" onclick="matchCancelChoice()">Cancel</button></div>${cards}</div>`;
   }
+  let stackBar='';
+  if(M.pending){ stackBar=`<div class="choicebar"><div class="cb-top"><span>⏳ ${esc(M.pending.name)} is on the stack</span><button class="btn sm" onclick="matchResolveSpell()">Resolve</button></div><div class="tiny muted" style="margin-top:4px">Waiting for your opponent to respond or pass…</div></div>`; }
+  else if(M.respond){ stackBar=`<div class="choicebar" style="border-color:#5a8bd6"><div class="cb-top"><span style="color:#8fb4e8">🪄 Opponent cast ${esc(M.respond.name)}</span></div><div class="row" style="gap:8px;margin-top:8px"><button class="btn gold" style="flex:1" onclick="matchRespondInstant()">Respond (instant)</button><button class="btn" onclick="matchRespondPass()">Pass</button></div></div>`; }
   let blockBar='';
   if(M.blocking){ const B=M.blocking;
     const ic=k=>[k.flying?'✈':'',k.deathtouch?'☠':'',k.trample?'⛰':'',k.doublestrike?'⚡⚡':(k.firststrike?'⚡':''),k.lifelink?'✚':'',k.menace?'👿':'',k.vigilance?'👁':''].filter(Boolean).join(' ');
@@ -1965,7 +1987,7 @@ function matchPlayHTML(){
       <div class="mhand">${me.hand.map((cid,i)=>{ const cd=card(cid),th=cd?(cd.thumb||''):''; return `<button class="mhcard${handChoice?' glow':''}" style="background-image:url('${th}')" title="${cd?esc(cd.name):''}" onclick="${handChoice?`matchPickChoice(${i})`:`matchPlay(${i})`}"></button>`; }).join('')||'<div class="tiny muted" style="padding:10px">Your hand is empty</div>'}</div>
     </div>`;
 
-  return blockBar + choiceBar + oppHtml + phaseBar + meHtml;
+  return stackBar + blockBar + choiceBar + oppHtml + phaseBar + meHtml;
 }
 function cancelMatchmaking(){ stopMatchmakingClient(); closeModal(); render(); toast('Matchmaking cancelled'); }
 function showMatchModal(){
@@ -2838,6 +2860,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   matchResolveEffects,matchPickChoice,matchCancelChoice,matchZoneView,
   matchTapForMana,matchAddMana,matchEmptyPool,matchNextPhase,matchCastCommander,matchCmdToZone,matchToggleAttacker,matchDeclareAttack,
   matchBlockMenu,matchSetBlock,matchNoBlocks,matchResolveBlocks,matchPromptX,matchPlayX,matchSendRemoval,
+  matchResolveSpell,matchRespondPass,matchRespondInstant,matchCastResponse,
   copyMyCode,shareMyCode,addFriend,removeFriend,playWithFriend});
 
 render();
