@@ -952,7 +952,7 @@ function lifeCounterHTML(){
       <button class="btn sm" onclick="resetLife()">↺ Reset</button>
       ${state.session
         ? `<button class="btn sm gold" onclick="openShare()">🔗 Room ${state.session.code}</button>`
-        : `<button class="btn sm" onclick="openShare()">🤝 Play with friends</button><button class="btn sm gold" onclick="setPlayMode('play')">🎯 Matchmaking</button>`}
+        : `<button class="btn sm" onclick="openShare()">🤝 Play with friends</button><button class="btn sm gold" onclick="startMatchmaking()">🎯 Matchmaking</button>`}
     </div>`;
   for(let i=0;i<p.count;i++){
     const v=p.life[i]; const col=PLAY_COLORS[i]; const out=playOut(i);
@@ -1534,7 +1534,7 @@ function startMatchmaking(){
 }
 function stopMatchmakingClient(){ const mm=state.matchmaking; if(mm){ if(mm.timer) clearInterval(mm.timer); try{ mm.client.end(true); }catch(e){} } state.matchmaking=null; }
 // Matched → drop straight into the shared game (no QR / share step)
-function enterMatchedGame(room){ closeModal(); state.tab='play'; state.game=null; joinRoom(room, true); render(); toast('🎯 Opponent found — game on!'); }
+function enterMatchedGame(room){ closeModal(); state.tab='play'; state.play.mode='life'; state.game=null; joinRoom(room, true); render(); toast('🎯 Opponent found — game on!'); }
 function cancelMatchmaking(){ stopMatchmakingClient(); closeModal(); render(); toast('Matchmaking cancelled'); }
 function showMatchModal(){
   const mm=state.matchmaking; const st=mm?mm.status:'';
