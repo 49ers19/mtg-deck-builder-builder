@@ -132,6 +132,10 @@ nav button.active .ic{filter:drop-shadow(0 0 6px rgba(227,193,75,.5))}
 @keyframes slideup{from{transform:translateY(40px);opacity:.6}to{transform:translateY(0);opacity:1}}
 .modal h3{font-size:18px;margin-bottom:14px}
 .field{margin-bottom:13px}
+body{transition:background-image .3s}
+.bgpick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:10px;padding:2px}
+.bgpick-tile{height:64px;border-radius:8px;background:var(--bg2) center/cover;border:1px solid var(--line);cursor:pointer;padding:0}
+.bgpick-tile.sel{outline:2px solid var(--accent2);border-color:var(--accent2)}
 .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600}
 .field input,.field select{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--text);font-size:15px}
 .field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
@@ -311,8 +315,9 @@ const DB = {
         cards: JSON.parse(localStorage.getItem('pdb_cards')||'{}'),
         wishlist: JSON.parse(localStorage.getItem('pdb_wishlist')||'{}'),
         friends: JSON.parse(localStorage.getItem('pdb_friends')||'[]'),
+        bg: localStorage.getItem('pdb_bg')||'',
       };
-    }catch(e){ return {decks:[],collection:{},cards:{},wishlist:{},friends:[]}; }
+    }catch(e){ return {decks:[],collection:{},cards:{},wishlist:{},friends:[],bg:''}; }
   },
   save(){
     localStorage.setItem('pdb_decks', JSON.stringify(state.decks));
@@ -320,6 +325,7 @@ const DB = {
     localStorage.setItem('pdb_cards', JSON.stringify(state.cards));
     localStorage.setItem('pdb_wishlist', JSON.stringify(state.wishlist));
     localStorage.setItem('pdb_friends', JSON.stringify(state.friends));
+    localStorage.setItem('pdb_bg', state.bgArt||'');
     if(state.user && !window._applyingRemote) scheduleCloudPush();
   }
 };
@@ -331,6 +337,8 @@ const state = {
   cards: loaded.cards,        // {cardId:{cached card fields}}
   wishlist: loaded.wishlist||{}, // {cardId:1}
   friends: loaded.friends||[],   // [{name, code}]
+  bgArt: loaded.bg||'',          // art_crop url used as the app background
+
   collMode: 'owned',
   openDeckId: null,
   searchResults: [],
@@ -710,10 +718,11 @@ function renderCollection(){
       <div class="stat"><div class="v">${unique}</div><div class="l">Unique</div></div>
       <div class="stat"><div class="v">$${totalVal.toFixed(0)}</div><div class="l">Est. Value</div></div>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px">
+    <div style="display:flex;gap:8px;margin-bottom:8px">
       <button class="btn gold" style="flex:1" onclick="openScanner()">📷 Scan</button>
       <button class="btn" style="flex:1" onclick="openPasteCollection()">📋 Paste cards</button>
-    </div>`;
+    </div>
+    <button class="btn ghost full" style="margin-bottom:12px" onclick="openBgPicker()">🎨 Set app background from card art</button>`;
   if(!ids.length){
     h += `<div class="empty"><div class="big">📚</div><div class="t">Empty collection</div>
       <div class="tiny">Paste a list, scan cards, or add them from Search.</div>
@@ -1946,6 +1955,34 @@ async function runPasteCollection(){
   toast(missing.length ? added+' cards added · '+missing.length+' not found' : added+' cards added to collection');
 }
 
+// ---------- Card-art app background ----------
+function artCrop(c){ const u=(c&&(c.img||c.thumb))||''; return u.replace('/normal/','/art_crop/').replace('/large/','/art_crop/').replace('/small/','/art_crop/'); }
+function applyBg(){
+  const b=document.body;
+  if(state.bgArt){
+    b.style.backgroundImage="linear-gradient(rgba(13,15,26,.84),rgba(13,15,26,.93)), url('"+state.bgArt+"')";
+    b.style.backgroundSize="cover"; b.style.backgroundPosition="center"; b.style.backgroundAttachment="fixed";
+  } else {
+    b.style.backgroundImage=""; b.style.backgroundSize=""; b.style.backgroundPosition=""; b.style.backgroundAttachment="";
+  }
+}
+function setBg(url){ state.bgArt=url||''; DB.save(); applyBg(); toast(url?'Background set':'Background cleared'); openBgPicker(); }
+function openBgPicker(){
+  const owned=Object.keys(state.collection).filter(id=>state.collection[id]>0);
+  let pool = owned.map(id=>card(id)).filter(c=>c && (c.img||c.thumb));
+  if(!pool.length) pool = Object.keys(state.cards).map(id=>card(id)).filter(c=>c && (c.img||c.thumb));
+  const seen=new Set(); pool = pool.filter(c=>{ if(seen.has(c.name)) return false; seen.add(c.name); return true; }).slice(0,80);
+  const noneGold = state.bgArt?'ghost':'gold';
+  const tiles = pool.map(c=>{ const art=artCrop(c); const sel=state.bgArt===art?' sel':''; return `<button class="bgpick-tile${sel}" title="${esc(c.name)}" style="background-image:url('${art}')" onclick='setBg(${JSON.stringify(art)})'></button>`; }).join('');
+  modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+      <h3>App background</h3>
+      <div class="tiny muted" style="margin-bottom:8px">Set a card's art as your background — a dark overlay keeps everything readable.</div>
+      <button class="btn ${noneGold} full" onclick="setBg('')">None · default dark</button>
+      ${pool.length ? `<div class="bgpick-grid">${tiles}</div>` : `<div class="tiny muted" style="padding:12px 0;text-align:center">Add some cards to your collection first — their art shows up here.</div>`}
+      <button class="btn ghost full" style="margin-top:12px" onclick="closeModal()">Done</button>
+    </div></div>`;
+}
+
 function deckQty(deckId,cardId,delta){
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
   if(delta>0 && singletonBlocked(null,cardId,d)){ toast('Singleton format — only one copy (basics excepted)'); return; }
@@ -2355,7 +2392,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,scanAdd,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
-  openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,
+  openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,openBgPicker,setBg,
   setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,installApp,
   startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
@@ -2365,6 +2402,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   copyMyCode,shareMyCode,addFriend,removeFriend,playWithFriend});
 
 render();
+applyBg();
 initFirebase();
 updateAccountUI();
 
