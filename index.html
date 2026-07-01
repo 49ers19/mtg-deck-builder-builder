@@ -136,6 +136,22 @@ body{transition:background-image .3s}
 .bgpick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:10px;padding:2px}
 .bgpick-tile{height:64px;border-radius:8px;background:var(--bg2) center/cover;border:1px solid var(--line);cursor:pointer;padding:0}
 .bgpick-tile.sel{outline:2px solid var(--accent2);border-color:var(--accent2)}
+.mpanel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+.mpanel.active{border-color:var(--accent2);box-shadow:0 0 0 1px var(--accent2)}
+.mp-head{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:14px;gap:8px}
+.mp-head span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mp-life{display:flex;align-items:center;gap:6px;font-size:15px;color:var(--accent2);white-space:nowrap}
+.mp-life button{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:7px;width:26px;height:26px;font-size:15px}
+.mp-sub{font-size:11px;color:var(--muted);margin:5px 0 8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.mboard{display:flex;flex-wrap:wrap;gap:5px;min-height:70px;background:var(--bg2);border-radius:9px;padding:6px}
+.mbcard{width:46px;height:64px;border-radius:5px;background:var(--panel2) center/cover;border:1px solid var(--line);padding:0}
+.mbcard.tapped{transform:rotate(18deg);opacity:.75}
+.mhand{display:flex;flex-wrap:wrap;gap:6px}
+.mhcard{width:58px;height:81px;border-radius:6px;background:var(--panel2) center/cover;border:1px solid var(--line);padding:0}
+.turnbar{display:flex;justify-content:space-between;align-items:center;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:13px}
+.dice-row{display:flex;gap:16px;justify-content:center;margin:14px 0}
+.die{width:74px;height:74px;border-radius:14px;background:var(--panel2);border:2px solid var(--accent);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:30px;font-weight:700;color:var(--accent2)}
+.die span{font-family:inherit;font-size:10px;color:var(--muted);letter-spacing:1px;margin-top:2px}
 .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600}
 .field input,.field select{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--text);font-size:15px}
 .field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
@@ -936,6 +952,7 @@ function playOut(i){
   return null;
 }
 function renderPlay(){
+  if(state.match) return renderMatch();
   if(state.game) return renderGame();
   const mode=state.play.mode||'life';
   main.innerHTML = `<div class="play-ctrl" style="margin-bottom:14px"><div class="pc-group">
@@ -1491,8 +1508,8 @@ async function joinRoom(code, silent){
   state.tab='play'; state.play.mode='life';
   if(!silent) showShareModal();
   else if(state.tab==='play'&&!state.game) renderPlay();
-  client.on('connect',()=>{ state.session.status='connected'; client.subscribe(roomTopic(code)); publishState(); if(!silent && $('#shareBody')) showShareModal(); if(state.tab==='play'&&!state.game) renderPlay(); });
-  client.on('message',(t,payload)=>{ try{ const d=JSON.parse(payload.toString()); if(!state.session||d.sender===state.session.sender) return; if(d.play){ state.play=d.play; if(state.tab==='play'&&!state.game) renderPlay(); } }catch(e){} });
+  client.on('connect',()=>{ state.session.status='connected'; client.subscribe(roomTopic(code)); publishState(); if(state.match) publishMatch(); if(!silent && $('#shareBody')) showShareModal(); if(state.tab==='play'&&!state.game) renderPlay(); });
+  client.on('message',(t,payload)=>{ try{ const d=JSON.parse(payload.toString()); if(!state.session||d.sender===state.session.sender) return; if(d.match){ applyMatchMsg(d); return; } if(d.play){ state.play=d.play; if(state.tab==='play'&&!state.game&&!state.match) renderPlay(); } }catch(e){} });
   client.on('error',()=>{ if(state.session){ state.session.status='error'; if($('#shareBody')) showShareModal(); } });
   client.on('close',()=>{ if(state.session&&state.session.status==='connected') state.session.status='reconnecting'; });
   client.on('reconnect',()=>{ if(state.session&&state.session.status!=='connected') state.session.status='connecting'; });
@@ -1522,19 +1539,120 @@ function startMatchmaking(){
         if(me<d.from){
           mm.matched=true; if(mm.timer) clearInterval(mm.timer);
           const room=genCode();
-          client.publish(LOBBY_TOPIC, JSON.stringify({t:'match',a:me,b:d.from,room}), {qos:0}, ()=>{ stopMatchmakingClient(); enterMatchedGame(room); });
+          client.publish(LOBBY_TOPIC, JSON.stringify({t:'match',a:me,b:d.from,room}), {qos:0}, ()=>{ stopMatchmakingClient(); enterMatchedGame(room, true); });
         }
       } else if(d.t==='match' && (d.a===me||d.b===me)){
         mm.matched=true; if(mm.timer) clearInterval(mm.timer);
-        const room=d.room; stopMatchmakingClient(); enterMatchedGame(room);
+        const room=d.room; stopMatchmakingClient(); enterMatchedGame(room, false);
       }
     });
     client.on('error',()=>{ const mm=state.matchmaking; if(mm){ mm.status='error'; if($('#matchBody')) showMatchModal(); } });
   }).catch(()=>toast('Could not load matchmaking'));
 }
 function stopMatchmakingClient(){ const mm=state.matchmaking; if(mm){ if(mm.timer) clearInterval(mm.timer); try{ mm.client.end(true); }catch(e){} } state.matchmaking=null; }
-// Matched → drop straight into the shared game (no QR / share step)
-function enterMatchedGame(room){ closeModal(); state.tab='play'; state.play.mode='life'; state.game=null; joinRoom(room, true); render(); toast('🎯 Opponent found — game on!'); }
+// Matched → drop straight into the networked Commander match (no QR / share step)
+function enterMatchedGame(room, isHost){ closeModal(); state.tab='play'; state.game=null; state.play.mode='life'; initMatch(isHost); joinRoom(room, true); render(); toast('🎯 Opponent found — choose your deck!'); }
+
+// ================= NETWORKED COMMANDER MATCH =================
+function initMatch(isHost){
+  state.match = { amHost:!!isHost, phase:'deck',
+    me:{ deck:null, cmd:null, life:40, hand:[], _lib:[], board:[], libCount:0, gyCount:0, ready:false },
+    opp:{ deck:null, cmd:null, life:40, board:[], handCount:0, libCount:0, gyCount:0, ready:false },
+    diceHost:null, diceGuest:null, firstHost:null, turnHost:null, rolling:false };
+}
+function seatPayload(){ const m=state.match.me; return { deck:m.deck, cmd:m.cmd, life:m.life, handCount:m.hand.length, libCount:m.libCount, gyCount:m.gyCount, board:m.board.map(c=>({cardId:c.cardId,tapped:!!c.tapped})), ready:m.ready }; }
+function sharedPayload(){ const M=state.match; return { phase:M.phase, diceHost:M.diceHost, diceGuest:M.diceGuest, firstHost:M.firstHost, turnHost:M.turnHost }; }
+function publishMatch(){ const s=state.session, M=state.match; if(!s||!s.client||!M) return; try{ s.client.publish(roomTopic(s.code), JSON.stringify({sender:s.sender, match:{ seat:seatPayload(), shared:sharedPayload() }}), {retain:true}); }catch(e){} }
+function applyMatchMsg(d){
+  const M=state.match; if(!M||!d.match) return;
+  const seat=d.match.seat, sh=d.match.shared;
+  if(seat){ M.opp = { deck:seat.deck, cmd:seat.cmd, life:seat.life, board:seat.board||[], handCount:seat.handCount||0, libCount:seat.libCount||0, gyCount:seat.gyCount||0, ready:!!seat.ready }; }
+  if(sh){
+    const wasMine = (M.amHost===M.turnHost);
+    if(!M.amHost){ M.phase=sh.phase; M.diceHost=sh.diceHost; M.diceGuest=sh.diceGuest; M.firstHost=sh.firstHost; }
+    if(sh.turnHost!=null) M.turnHost=sh.turnHost;
+    const nowMine = (M.amHost===M.turnHost);
+    if(M.phase==='play' && !wasMine && nowMine){ M.me.board.forEach(c=>c.tapped=false); publishMatch(); toast('🌀 Your turn — permanents untapped'); }
+  }
+  maybeAdvanceMatch();
+  if(state.tab==='play') renderPlay();
+}
+function maybeAdvanceMatch(){ const M=state.match; if(!M||!M.amHost) return; if(M.phase==='deck' && M.me.ready && M.opp.ready){ M.phase='dice'; publishMatch(); } }
+function matchPickDeck(deckId){
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  const lib=[]; for(const cid in d.cards){ for(let k=0;k<d.cards[cid];k++) lib.push(cid); } shuffle(lib);
+  const m=state.match.me; m.deck=d.name; m.cmd=d.commander||null; m.life=40; m.board=[]; m.gyCount=0;
+  m._lib=lib; m.hand=[]; for(let i=0;i<7 && m._lib.length;i++) m.hand.push(m._lib.shift()); m.libCount=m._lib.length; m.ready=true;
+  enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[]));
+  publishMatch(); maybeAdvanceMatch(); renderPlay();
+}
+function matchDraw(){ const m=state.match.me; if(m._lib&&m._lib.length){ m.hand.push(m._lib.shift()); m.libCount=m._lib.length; publishMatch(); renderPlay(); } else toast('Library is empty'); }
+function matchMulligan(){ const m=state.match.me; const all=m.hand.concat(m._lib); shuffle(all); m._lib=all; m.hand=[]; for(let i=0;i<7 && m._lib.length;i++) m.hand.push(m._lib.shift()); m.libCount=m._lib.length; publishMatch(); renderPlay(); toast('Mulliganed to 7'); }
+function matchPlay(idx){ const m=state.match.me; const cid=m.hand[idx]; if(cid==null) return; m.hand.splice(idx,1); m.board.push({iid:uid(),cardId:cid,tapped:false}); publishMatch(); renderPlay(); }
+function matchLife(delta){ const m=state.match.me; m.life+=delta; publishMatch(); renderPlay(); }
+function matchBoardMenu(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(!c) return; const cd=card(c.cardId);
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>${cd?esc(cd.name):'Card'}</h3>
+    <button class="btn full" onclick="matchTapBoard('${iid}')">${c.tapped?'Untap':'Tap'}</button>
+    <button class="btn full" style="margin-top:6px" onclick="matchToGrave('${iid}')">Send to graveyard</button>
+    <button class="btn full" style="margin-top:6px" onclick="matchToHand('${iid}')">Return to hand</button>
+    <button class="btn ghost full" style="margin-top:6px" onclick="closeModal()">Close</button></div></div>`; }
+function matchTapBoard(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(c){ c.tapped=!c.tapped; publishMatch(); } closeModal(); renderPlay(); }
+function matchToGrave(iid){ const m=state.match.me; if(m.board.some(x=>x.iid===iid)) m.gyCount++; m.board=m.board.filter(x=>x.iid!==iid); publishMatch(); closeModal(); renderPlay(); }
+function matchToHand(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(c){ m.hand.push(c.cardId); m.board=m.board.filter(x=>x.iid!==iid); } publishMatch(); closeModal(); renderPlay(); }
+function matchRoll(){ const M=state.match; if(!M.amHost){ toast('Waiting for the host to roll…'); return; } if(M.rolling) return; M.rolling=true;
+  let n=0; const iv=setInterval(()=>{ M.diceHost=1+Math.floor(Math.random()*20); M.diceGuest=1+Math.floor(Math.random()*20); renderPlay();
+    if(++n>=9){ clearInterval(iv); if(M.diceHost===M.diceGuest) M.diceHost=Math.min(20,M.diceHost===20?19:M.diceHost+1); M.firstHost=M.diceHost>M.diceGuest; M.turnHost=M.firstHost; M.rolling=false; publishMatch(); renderPlay(); } }, 110);
+}
+function matchBegin(){ const M=state.match; M.phase='play'; if(M.turnHost==null) M.turnHost=(M.firstHost!=null?M.firstHost:true); publishMatch(); renderPlay(); if(M.amHost===M.turnHost) toast('You’re on the play — go!'); }
+function matchEndTurn(){ const M=state.match; if(M.amHost!==M.turnHost){ toast('It’s not your turn'); return; } M.turnHost=!M.turnHost; publishMatch(); renderPlay(); toast('Turn passed to your opponent'); }
+function exitMatch(){ if(!confirm('Leave this match? The game will end for you.')) return; state.match=null; try{ leaveSession(); }catch(e){ state.session=null; render(); } }
+
+function renderMatch(){
+  const M=state.match; if(!M){ renderPlay(); return; }
+  main.innerHTML = `<div class="play-ctrl" style="margin-bottom:12px"><div class="pc-group"><span class="pc-lbl">⚔️ Commander match</span></div><button class="btn sm danger" onclick="exitMatch()">Leave</button></div>`
+    + (M.phase==='deck'?matchDeckHTML(): M.phase==='dice'?matchDiceHTML(): matchPlayHTML());
+}
+function matchDeckHTML(){
+  const decks=state.decks.filter(d=>d.format==='Commander'); const m=state.match.me,o=state.match.opp; let h='';
+  if(!m.ready){
+    if(!decks.length) return `<div class="empty"><div class="big">▶</div><div class="t">No Commander decks</div><div class="tiny">Build or import a Commander deck first, then you can play a match.</div></div>`;
+    h+=`<div class="section-title">Choose your Commander deck</div>`;
+    decks.forEach(d=>{ const cmd=d.commander&&card(d.commander); h+=`<div class="decktile" onclick="matchPickDeck('${d.id}')"><div class="col"><div class="dn">${esc(d.name)}</div><div class="ds">${cmd?'👑 '+esc(cmd.name):'No commander set'} · ${deckCardCount(d)} cards</div></div><div style="font-size:20px;color:var(--muted)">▶</div></div>`; });
+  } else {
+    h+=`<div class="panel"><div class="section-title" style="margin-top:0">✓ You’re locked in</div><div class="ds">${esc(m.deck)}${m.cmd&&card(m.cmd)?' · 👑 '+esc(card(m.cmd).name):''}</div></div>`;
+    h+=`<div class="panel"><div class="tiny muted">${o.ready?'Both ready — rolling for turn order…':'Waiting for your opponent to choose a deck…'}</div></div>`;
+  }
+  return h;
+}
+function matchDiceHTML(){
+  const M=state.match; const rolled = M.firstHost!=null && !M.rolling;
+  const myR = M.amHost?M.diceHost:M.diceGuest, opR = M.amHost?M.diceGuest:M.diceHost;
+  const iGoFirst = M.amHost?M.firstHost:!M.firstHost;
+  let h=`<div class="section-title">Roll for who goes first</div>`;
+  h+=`<div class="dice-row"><div class="die">${myR!=null?myR:'—'}<span>You</span></div><div class="die">${opR!=null?opR:'—'}<span>Opp</span></div></div>`;
+  if(!rolled){ h+= M.amHost?`<button class="btn gold full" onclick="matchRoll()">🎲 Roll the dice</button>`:`<div class="panel"><div class="tiny muted">Waiting for the host to roll the dice…</div></div>`; }
+  else { h+=`<div class="panel" style="text-align:center"><div style="font-weight:700;font-size:16px;color:${iGoFirst?'var(--ok)':'var(--text)'}">${iGoFirst?'🎉 You go first!':'Opponent goes first'}</div></div>`+ (M.amHost?`<button class="btn gold full" onclick="matchBegin()">Begin game ▶</button>`:`<div class="panel"><div class="tiny muted">Waiting for the host to start the game…</div></div>`); }
+  return h;
+}
+function mBoardCard(c,mine){ const cd=card(c.cardId),th=cd?(cd.thumb||''):''; return `<button class="mbcard ${c.tapped?'tapped':''}" style="background-image:url('${th}')" title="${cd?esc(cd.name):''}" ${mine?`onclick="matchBoardMenu('${c.iid}')"`:'disabled'}></button>`; }
+function matchPlayHTML(){
+  const M=state.match, me=M.me, o=M.opp; const myTurn=(M.amHost===M.turnHost);
+  let h=`<div class="mpanel ${!myTurn?'active':''}">
+      <div class="mp-head"><span>${o.cmd&&card(o.cmd)?'👑 '+esc(card(o.cmd).name):'Opponent'}</span><span class="mp-life">❤ ${o.life}</span></div>
+      <div class="mp-sub">${o.deck?esc(o.deck)+' · ':''}🂠 ${o.handCount} · 📚 ${o.libCount} · ⚰ ${o.gyCount}${!myTurn?' · <b style="color:var(--accent2)">their turn</b>':''}</div>
+      <div class="mboard">${(o.board||[]).map(c=>mBoardCard(c,false)).join('')||'<div class="tiny muted" style="padding:10px">No permanents in play</div>'}</div>
+    </div>
+    <div class="turnbar"><span>${myTurn?'<b style="color:var(--ok)">Your turn</b>':'Opponent’s turn'}</span><button class="btn sm ${myTurn?'gold':''}" ${myTurn?'':'disabled'} onclick="matchEndTurn()">End turn ⏭</button></div>
+    <div class="mpanel ${myTurn?'active':''}">
+      <div class="mp-head"><span>${me.cmd&&card(me.cmd)?'👑 '+esc(card(me.cmd).name):'You'}</span>
+        <span class="mp-life"><button onclick="matchLife(-1)">−</button>❤ ${me.life}<button onclick="matchLife(1)">＋</button></span></div>
+      <div class="mp-sub">${me.deck?esc(me.deck)+' · ':''}📚 ${me.libCount} · ⚰ ${me.gyCount} <button class="btn sm" onclick="matchDraw()">Draw</button> <button class="btn sm" onclick="matchMulligan()">Mulligan</button></div>
+      <div class="mboard">${me.board.map(c=>mBoardCard(c,true)).join('')||'<div class="tiny muted" style="padding:10px">Tap a card in your hand to play it →</div>'}</div>
+      <div class="section-title" style="margin:12px 2px 6px">Your hand (${me.hand.length})</div>
+      <div class="mhand">${me.hand.map((cid,i)=>{ const cd=card(cid),th=cd?(cd.thumb||''):''; return `<button class="mhcard" style="background-image:url('${th}')" title="${cd?esc(cd.name):''}" onclick="matchPlay(${i})"></button>`; }).join('')||'<div class="tiny muted" style="padding:10px">Your hand is empty</div>'}</div>
+    </div>`;
+  return h;
+}
 function cancelMatchmaking(){ stopMatchmakingClient(); closeModal(); render(); toast('Matchmaking cancelled'); }
 function showMatchModal(){
   const mm=state.matchmaking; const st=mm?mm.status:'';
@@ -2402,6 +2520,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
   setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,cancelTarget,applyTargetOpponent,applyTargetTo,lethalDamage,
   openShare,joinRoom,leaveSession,copyShare,startMatchmaking,cancelMatchmaking,
+  matchPickDeck,matchDraw,matchMulligan,matchPlay,matchLife,matchBoardMenu,matchTapBoard,matchToGrave,matchToHand,matchRoll,matchBegin,matchEndTurn,exitMatch,
   copyMyCode,shareMyCode,addFriend,removeFriend,playWithFriend});
 
 render();
