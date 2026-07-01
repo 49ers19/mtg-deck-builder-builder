@@ -1706,6 +1706,7 @@ function matchPlay(idx){
     if(m.landsThisTurn>=1){ toast('Only one land per turn'); return; }
     m.hand.splice(idx,1); m.board.push({iid:uid(),cardId:cid,tapped:false,sick:false}); m.landsThisTurn++;
   } else {
+    if(/\{X\}/i.test(cd&&cd.mana_cost||'')){ matchPromptX(idx); return; }
     const need=parseCost(cd&&cd.mana_cost);
     if(!poolCanPay(m.pool,need)){ toast('Not enough mana — need '+(manaText(cd&&cd.mana_cost)||'?')+'. Tap lands for mana first.'); return; }
     poolPay(m.pool,need);
@@ -1714,6 +1715,11 @@ function matchPlay(idx){
   }
   publishMatch(); renderPlay();
 }
+function matchPromptX(idx){ const m=state.match.me,cid=m.hand[idx],cd=card(cid); const avail=poolTotal(m.pool);
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Cast ${cd?esc(cd.name):'spell'} — choose X</h3><div class="tiny muted" style="margin-bottom:8px">Cost ${manaText(cd&&cd.mana_cost)||''} · you have ${avail} mana in your pool.</div><div class="row" style="gap:6px;flex-wrap:wrap">${[0,1,2,3,4,5,6,8,10].map(x=>`<button class="btn sm" onclick="matchPlayX(${idx},${x})">X=${x}</button>`).join('')}</div><button class="btn ghost full" style="margin-top:10px" onclick="closeModal()">Cancel</button></div></div>`; }
+function matchPlayX(idx,x){ closeModal(); const m=state.match.me,cid=m.hand[idx],cd=card(cid); if(cid==null) return; const need=parseCost(cd&&cd.mana_cost); need.generic+=Math.max(0,x||0);
+  if(!poolCanPay(m.pool,need)){ toast('Not enough mana for X='+x+' — need '+(need.generic)+' generic + colors'); return; }
+  poolPay(m.pool,need); m.hand.splice(idx,1); m.board.push({iid:uid(),cardId:cid,tapped:false,sick:isCreatureType(cd),xval:x}); matchResolveEffects(cid); publishMatch(); renderPlay(); }
 function matchLife(delta){ const m=state.match.me; m.life+=delta; publishMatch(); renderPlay(); }
 function cardHasAbility(cd){ return !!(cd && /return [^.]*from (?:your|a) graveyard to (?:your hand|the battlefield)|(?:cast|play) [^.]*from your hand without paying|put [^.]*from your hand onto the battlefield/i.test(cd.text||'')); }
 function matchBoardMenu(iid){ const M=state.match,m=M.me,c=m.board.find(x=>x.iid===iid); if(!c) return; const cd=card(c.cardId); const nm=cd?esc(cd.name):(c.token?esc(c.token)+' token':'Card');
@@ -1773,24 +1779,68 @@ function matchCastCommander(){ const m=state.match.me; if(!m.cmd){ toast('No com
   poolPay(m.pool,need); m.cmdZone=false; m.cmdTax+=2; m.board.push({iid:uid(),cardId:m.cmd,tapped:false,sick:true,isCmd:true});
   toast('👑 '+(cd?cd.name:'Commander')+' cast'); publishMatch(); renderPlay(); }
 function matchCmdToZone(iid){ const m=state.match.me; if(m.board.some(x=>x.iid===iid)){ m.board=m.board.filter(x=>x.iid!==iid); m.cmdZone=true; } publishMatch(); closeModal(); renderPlay(); }
-// ---- combat ----
+// ---- combat with keywords ----
+function kw(cd){ const has=w=>new RegExp('(^|[\\n,.;( ])'+w+'([\\n,.;) ]|$)','i').test((cd&&cd.text)||''); return {
+  flying:has('flying'), reach:has('reach'), firststrike:has('first strike'), doublestrike:has('double strike'),
+  deathtouch:has('deathtouch'), trample:has('trample'), menace:has('menace'), vigilance:has('vigilance'), lifelink:has('lifelink') }; }
+function toughOf(cd){ return parseInt(cd&&cd.toughness,10)||1; }
 function matchToggleAttacker(iid){ const M=state.match,m=M.me; const c=m.board.find(x=>x.iid===iid); if(!c) return; const cd=card(c.cardId);
   if(!isCreatureType(cd)){ toast('Only creatures can attack'); return; }
   if(c.sick){ toast('💤 Summoning sick — can’t attack this turn'); return; }
   if(!c.atk && c.tapped){ toast('Tapped creatures can’t attack'); return; }
-  c.atk=!c.atk; c.tapped=c.atk; publishMatch(); renderPlay(); }
+  c.atk=!c.atk; if(!kw(cd).vigilance) c.tapped=c.atk; publishMatch(); renderPlay(); }
 function matchDeclareAttack(){ const M=state.match,m=M.me; const atk=m.board.filter(c=>c.atk); if(!atk.length){ toast('Tap creatures to attack first'); return; }
-  let total=0,cmdr=0; atk.forEach(c=>{ const p=creaturePower(card(c.cardId)); total+=p; if(c.isCmd||c.cardId===m.cmd) cmdr+=p; });
-  const s=state.session; if(s&&s.client){ try{ s.client.publish(roomTopic(s.code), JSON.stringify({sender:s.sender, matchEvent:{type:'attack',amount:total,cmdr}})); }catch(e){} }
-  atk.forEach(c=>c.atk=false); toast('⚔ Attacked for '+total+(cmdr?' ('+cmdr+' commander)':''));
+  const attackers=atk.map(c=>{ const cd=card(c.cardId); return { iid:c.iid, name:cd?cd.name:'Creature', pow:creaturePower(cd), tou:toughOf(cd), isCmd:!!(c.isCmd||c.cardId===m.cmd), kw:kw(cd) }; });
+  const s=state.session; if(s&&s.client){ try{ s.client.publish(roomTopic(s.code), JSON.stringify({sender:s.sender, matchEvent:{type:'attack',attackers}})); }catch(e){} }
+  atk.forEach(c=>c.atk=false); toast('⚔ Attacking with '+attackers.length+' creature(s) — opponent declares blockers');
   publishMatch(); renderPlay(); }
-function applyMatchEvent(d){ const M=state.match; if(!M||!d.matchEvent) return; const e=d.matchEvent; if(e.type==='attack'){ M.incoming={amount:e.amount||0,cmdr:e.cmdr||0}; toast('⚔ Incoming attack for '+(e.amount||0)+'!'); renderPlay(); } }
-function matchTakeDamage(){ const M=state.match,m=M.me,inc=M.incoming; if(!inc) return; m.life-=inc.amount; m.cmdDmg+=inc.cmdr; M.incoming=null; publishMatch(); renderPlay(); if(m.cmdDmg>=21) toast('☠ 21 commander damage — you lose!'); else if(m.life<=0) toast('☠ Life 0 — you lose!'); }
-function matchDismissIncoming(){ state.match.incoming=null; renderPlay(); }
+function applyMatchEvent(d){ const M=state.match; if(!M||!d.matchEvent) return; const e=d.matchEvent;
+  if(e.type==='attack'){ M.blocking={ attackers:e.attackers||[], assign:{} }; toast('🛡 You’re being attacked — declare blockers'); renderPlay(); }
+  else if(e.type==='combatResult'){ const m=M.me;
+    (e.deadAttackers||[]).forEach(iid=>{ const c=m.board.find(x=>x.iid===iid); if(c){ if(!c.token&&c.cardId!=null){ if(c.isCmd||c.cardId===m.cmd) m.cmdZone=true; else m.gy.push(c.cardId); } m.board=m.board.filter(x=>x.iid!==iid); } });
+    if(e.attackerLifelink) m.life+=e.attackerLifelink;
+    publishMatch(); renderPlay(); toast('Combat resolved'+(e.attackerLifelink?' · +'+e.attackerLifelink+' lifelink':'')); }
+  else if(e.type==='removal'){ matchApplyRemoval(e); } }
+function matchBlockMenu(blockerIid){ const M=state.match,B=M.blocking,m=M.me; if(!B) return; const c=m.board.find(x=>x.iid===blockerIid); if(!c) return; if(c.tapped){ toast('Tapped creatures can’t block'); return; } const cd=card(c.cardId); if(!isCreatureType(cd)){ toast('Only creatures block'); return; } const bk=kw(cd);
+  const opts=B.attackers.map((a,i)=>{ const canBlock=!a.kw.flying||bk.flying||bk.reach; return canBlock?`<button class="btn full" style="margin-top:6px" onclick="matchSetBlock('${blockerIid}',${i})">Block ${esc(a.name)} (${a.pow}/${a.tou})</button>`:''; }).join('');
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>${esc(cd.name)} blocks…</h3>${opts||'<div class="tiny muted">No legal target — flyers need flying or reach.</div>'}<button class="btn full" style="margin-top:6px" onclick="matchSetBlock('${blockerIid}',-1)">Don’t block</button><button class="btn ghost full" style="margin-top:6px" onclick="closeModal()">Close</button></div></div>`; }
+function matchSetBlock(blockerIid, atkIdx){ const B=state.match.blocking; if(!B) return; if(atkIdx<0) delete B.assign[blockerIid]; else B.assign[blockerIid]=atkIdx; closeModal(); renderPlay(); }
+function matchNoBlocks(){ const B=state.match.blocking; if(B) B.assign={}; matchResolveBlocks(); }
+function matchResolveBlocks(){
+  const M=state.match, B=M.blocking, m=M.me; if(!B) return;
+  const byAtk={}; Object.keys(B.assign).forEach(bid=>{ const ai=B.assign[bid]; (byAtk[ai]=byAtk[ai]||[]).push(bid); });
+  let faceDmg=0, cmdDmg=0, atkLifelink=0, myLifelink=0; const deadAttackers=[], deadBlockers=[];
+  B.attackers.forEach((a,i)=>{
+    const blockers=(byAtk[i]||[]).map(bid=>m.board.find(x=>x.iid===bid)).filter(Boolean);
+    const aStrike=a.kw.doublestrike?2:1, pw=a.pow*aStrike;
+    const blocked = blockers.length && !(a.kw.menace && blockers.length<2);
+    if(!blocked){ faceDmg+=pw; if(a.isCmd) cmdDmg+=pw; if(a.kw.lifelink) atkLifelink+=pw; return; }
+    // blockers deal to attacker (a blocker killed first by attacker's first/double strike deals nothing back)
+    let dmgToAtk=0, blockerDT=false;
+    blockers.forEach(b=>{ const bcd=card(b.cardId), bk=kw(bcd), bp=creaturePower(bcd), bStrike=bk.doublestrike?2:1;
+      const aFS=a.kw.firststrike||a.kw.doublestrike, bFS=bk.firststrike||bk.doublestrike;
+      const killedFirst = aFS && !bFS && ((a.kw.deathtouch&&pw>0) || pw>=toughOf(bcd));
+      if(!killedFirst){ dmgToAtk+=bp*bStrike; if(bk.deathtouch&&bp>0) blockerDT=true; if(bk.lifelink) myLifelink+=bp*bStrike; } });
+    // attacker assigns lethal to each blocker in order; trample overflows to face
+    let remaining=pw;
+    blockers.forEach(b=>{ const bcd=card(b.cardId); const need=a.kw.deathtouch?1:toughOf(bcd); const give=Math.min(remaining,need); remaining-=give; if((a.kw.deathtouch&&give>0)||give>=toughOf(bcd)) deadBlockers.push(b.iid); });
+    if(a.kw.trample && remaining>0){ faceDmg+=remaining; if(a.isCmd) cmdDmg+=remaining; }
+    if(a.kw.lifelink) atkLifelink+=pw; // a blocked creature deals all its power
+    if((blockerDT&&dmgToAtk>0) || dmgToAtk>=a.tou) deadAttackers.push(a.iid);
+  });
+  m.life-=faceDmg; m.cmdDmg+=cmdDmg; m.life+=myLifelink;
+  deadBlockers.forEach(bid=>{ const c=m.board.find(x=>x.iid===bid); if(c){ if(!c.token&&c.cardId!=null){ if(c.isCmd||c.cardId===m.cmd) m.cmdZone=true; else m.gy.push(c.cardId); } m.board=m.board.filter(x=>x.iid!==bid); } });
+  const s=state.session; if(s&&s.client){ try{ s.client.publish(roomTopic(s.code), JSON.stringify({sender:s.sender, matchEvent:{type:'combatResult', deadAttackers, attackerLifelink:atkLifelink}})); }catch(e){} }
+  M.blocking=null; publishMatch(); renderPlay();
+  let msg='Combat: took '+faceDmg+' damage'; if(cmdDmg) msg+=' ('+cmdDmg+' cmdr)'; if(myLifelink) msg+=' · +'+myLifelink+' lifelink';
+  toast(msg); if(m.cmdDmg>=21) toast('☠ 21 commander damage — you lose!'); else if(m.life<=0) toast('☠ Life 0 — you lose!');
+}
 function matchRoll(){ const M=state.match; if(!M.amHost){ toast('Waiting for the host to roll…'); return; } if(M.rolling) return; M.rolling=true;
   let n=0; const iv=setInterval(()=>{ M.diceHost=1+Math.floor(Math.random()*20); M.diceGuest=1+Math.floor(Math.random()*20); renderPlay();
     if(++n>=9){ clearInterval(iv); if(M.diceHost===M.diceGuest) M.diceHost=Math.min(20,M.diceHost===20?19:M.diceHost+1); M.firstHost=M.diceHost>M.diceGuest; M.turnHost=M.firstHost; M.rolling=false; publishMatch(); renderPlay(); } }, 110);
 }
+function matchSendRemoval(kind, tgt){ if(!tgt) return; const s=state.session; if(s&&s.client){ try{ s.client.publish(roomTopic(s.code), JSON.stringify({sender:s.sender, matchEvent:{type:'removal',kind,iid:tgt.iid}})); }catch(e){} } toast('🎯 '+kind+' → opponent’s '+(card(tgt.cardId)?card(tgt.cardId).name:'permanent')); }
+function matchApplyRemoval(e){ const m=state.match.me,c=m.board.find(x=>x.iid===e.iid); if(!c) return; m.board=m.board.filter(x=>x.iid!==e.iid); if(!c.token&&c.cardId!=null){ if(c.isCmd||c.cardId===m.cmd) m.cmdZone=true; else if(e.kind==='exile') m.exile.push(c.cardId); else if(e.kind==='bounce') m.hand.push(c.cardId); else m.gy.push(c.cardId); } publishMatch(); renderPlay(); const v=e.kind==='exile'?'exiled':e.kind==='bounce'?'bounced':'destroyed'; toast('🎯 Your '+(card(c.cardId)?card(c.cardId).name:'permanent')+' was '+v); }
 function matchBegin(){ const M=state.match; M.phase='play'; if(M.turnHost==null) M.turnHost=(M.firstHost!=null?M.firstHost:true); if(M.amHost===M.turnHost) matchStartMyTurn(); publishMatch(); renderPlay(); }
 function matchEndTurn(){ const M=state.match; if(M.amHost!==M.turnHost){ toast('It’s not your turn'); return; } M.turnHost=!M.turnHost; publishMatch(); renderPlay(); toast('Turn passed to your opponent'); }
 function exitMatch(){ if(!confirm('Leave this match? The game will end for you.')) return; state.match=null; try{ leaveSession(); }catch(e){ state.session=null; render(); } }
@@ -1811,6 +1861,12 @@ function matchResolveEffects(cardId){
     startMatchChoice('hand','Choose a card from your hand to put onto the battlefield',(cid,idx)=>{ me.hand.splice(idx,1); me.board.push({iid:uid(),cardId:cid,tapped:false,sick:isCreatureType(card(cid))}); toast('⚡ '+(card(cid)?card(cid).name:'Card')+' put into play'); });
     return;
   }
+  // CHOICE — targeted removal on an opponent's permanent (you pick the target)
+  let rem=null;
+  if(/destroy target (creature|permanent|artifact|enchantment|planeswalker|nonland permanent)/.test(t)) rem='destroy';
+  else if(/exile target (creature|permanent|artifact|enchantment|planeswalker)/.test(t)) rem='exile';
+  else if(/return target (creature|permanent|nonland permanent)[^.]*to (?:its owner|their|owner)[’']?s? hand/.test(t)) rem='bounce';
+  if(rem && (M.opp.board||[]).length){ startMatchChoice('oppboard','Choose an opponent’s permanent to '+rem,(it)=>{ matchSendRemoval(rem,it); }); return; }
   // AUTOMATIC — no-choice effects on enter/cast
   const etb=/\b(instant|sorcery)\b/.test(tl) || /enters(?: the battlefield)?[^.]*(?:,|:)/.test(t) || /when [^.]*enters/.test(t);
   if(!etb) return;
@@ -1824,7 +1880,7 @@ function matchResolveEffects(cardId){
   if(notes.length){ toast('✨ '+cd.name+': '+notes.join(' · ')); publishMatch(); renderPlay(); }
 }
 function startMatchChoice(zone,prompt,resolve){ state.match.choice={zone,prompt,resolve}; renderPlay(); }
-function matchPickChoice(idx){ const M=state.match, ch=M.choice; if(!ch) return; const arr=ch.zone==='gy'?M.me.gy:ch.zone==='hand'?M.me.hand:M.me.exile; const cid=arr[idx]; M.choice=null; if(cid!=null) ch.resolve(cid,idx); publishMatch(); renderPlay(); }
+function matchPickChoice(idx){ const M=state.match, ch=M.choice; if(!ch) return; const arr=ch.zone==='gy'?M.me.gy:ch.zone==='hand'?M.me.hand:ch.zone==='exile'?M.me.exile:(M.opp.board||[]); const cid=arr[idx]; M.choice=null; if(cid!=null) ch.resolve(cid,idx); publishMatch(); renderPlay(); }
 function matchCancelChoice(){ state.match.choice=null; renderPlay(); }
 function matchZoneView(zone){
   const M=state.match; let arr,title;
@@ -1872,11 +1928,15 @@ function matchPlayHTML(){
   const handChoice = M.choice && M.choice.zone==='hand';
   let choiceBar='';
   if(M.choice){ let cards='';
-    if(M.choice.zone!=='hand'){ const arr=M.choice.zone==='gy'?me.gy:me.exile; cards=`<div class="mhand">`+(arr.map((cid,i)=>{ const cd=card(cid),th=cd?(cd.thumb||''):''; return `<button class="mhcard glow" style="background-image:url('${th}')" title="${cd?esc(cd.name):''}" onclick="matchPickChoice(${i})"></button>`; }).join('')||'<div class="tiny muted" style="padding:8px">No eligible cards</div>')+`</div>`; }
+    if(M.choice.zone!=='hand'){ const board=M.choice.zone==='oppboard'; const arr=M.choice.zone==='gy'?me.gy:board?(M.opp.board||[]):me.exile; cards=`<div class="mhand">`+(arr.map((it,i)=>{ const cid=board?it.cardId:it; const cd=card(cid),th=cd?(cd.thumb||''):''; return `<button class="mhcard glow" style="background-image:url('${th}')" title="${cd?esc(cd.name):''}" onclick="matchPickChoice(${i})"></button>`; }).join('')||'<div class="tiny muted" style="padding:8px">No targets</div>')+`</div>`; }
     choiceBar=`<div class="choicebar"><div class="cb-top"><span>✨ ${esc(M.choice.prompt)}</span><button class="btn sm" onclick="matchCancelChoice()">Cancel</button></div>${cards}</div>`;
   }
-  let incBar='';
-  if(M.incoming){ incBar=`<div class="choicebar" style="border-color:var(--danger)"><div class="cb-top"><span style="color:var(--danger)">⚔ Incoming attack: ${M.incoming.amount} damage${M.incoming.cmdr?' ('+M.incoming.cmdr+' from their commander)':''}</span></div><div class="row" style="gap:8px;margin-top:8px"><button class="btn danger" style="flex:1" onclick="matchTakeDamage()">Take ${M.incoming.amount}</button><button class="btn ghost" onclick="matchDismissIncoming()">Ignore</button></div></div>`; }
+  let blockBar='';
+  if(M.blocking){ const B=M.blocking;
+    const ic=k=>[k.flying?'✈':'',k.deathtouch?'☠':'',k.trample?'⛰':'',k.doublestrike?'⚡⚡':(k.firststrike?'⚡':''),k.lifelink?'✚':'',k.menace?'👿':'',k.vigilance?'👁':''].filter(Boolean).join(' ');
+    const atkList=B.attackers.map((a,i)=>{ const blk=Object.keys(B.assign).filter(bid=>B.assign[bid]===i).length; return `<div class="tiny" style="margin:2px 0"><b>${esc(a.name)}</b> ${a.pow}/${a.tou} ${ic(a.kw)} ${blk?`<span style="color:var(--ok)">blocked ×${blk}</span>`:'<span style="color:var(--danger)">unblocked</span>'}</div>`; }).join('');
+    const blockers=me.board.filter(c=>isCreatureType(card(c.cardId))&&!c.tapped).map(c=>{ const cd=card(c.cardId),to=B.assign[c.iid]; return `<button class="mhcard${to!=null?' glow':''}" title="${esc(cd.name)}" style="background-image:url('${cd.thumb||''}')" onclick="matchBlockMenu('${c.iid}')">${to!=null?'<span class="mbadge">🛡</span>':''}</button>`; }).join('')||'<div class="tiny muted" style="padding:6px">No untapped creatures to block with</div>';
+    blockBar=`<div class="choicebar" style="border-color:var(--danger)"><div class="cb-top"><span style="color:var(--danger)">🛡 Declare blockers</span><button class="btn sm" onclick="matchNoBlocks()">Take it all</button></div>${atkList}<div class="tiny muted" style="margin:7px 0 4px">Tap your creatures to assign a block:</div><div class="mhand">${blockers}</div><button class="btn gold full" style="margin-top:9px" onclick="matchResolveBlocks()">Resolve combat</button></div>`; }
 
   const oppDmg=o.cmdDmg?` · <span style="color:${o.cmdDmg>=21?'var(--danger)':'var(--muted)'}">☠ ${o.cmdDmg}/21</span>`:'';
   const oppHtml=`<div class="mpanel ${!myTurn?'active':''}">
@@ -1905,7 +1965,7 @@ function matchPlayHTML(){
       <div class="mhand">${me.hand.map((cid,i)=>{ const cd=card(cid),th=cd?(cd.thumb||''):''; return `<button class="mhcard${handChoice?' glow':''}" style="background-image:url('${th}')" title="${cd?esc(cd.name):''}" onclick="${handChoice?`matchPickChoice(${i})`:`matchPlay(${i})`}"></button>`; }).join('')||'<div class="tiny muted" style="padding:10px">Your hand is empty</div>'}</div>
     </div>`;
 
-  return incBar + choiceBar + oppHtml + phaseBar + meHtml;
+  return blockBar + choiceBar + oppHtml + phaseBar + meHtml;
 }
 function cancelMatchmaking(){ stopMatchmakingClient(); closeModal(); render(); toast('Matchmaking cancelled'); }
 function showMatchModal(){
@@ -2776,7 +2836,8 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   openShare,joinRoom,leaveSession,copyShare,startMatchmaking,cancelMatchmaking,
   matchPickDeck,matchDraw,matchMulligan,matchPlay,matchLife,matchBoardMenu,matchTapBoard,matchToGrave,matchToExile,matchToHand,matchUseAbility,matchRoll,matchBegin,matchEndTurn,exitMatch,
   matchResolveEffects,matchPickChoice,matchCancelChoice,matchZoneView,
-  matchTapForMana,matchAddMana,matchEmptyPool,matchNextPhase,matchCastCommander,matchCmdToZone,matchToggleAttacker,matchDeclareAttack,matchTakeDamage,matchDismissIncoming,
+  matchTapForMana,matchAddMana,matchEmptyPool,matchNextPhase,matchCastCommander,matchCmdToZone,matchToggleAttacker,matchDeclareAttack,
+  matchBlockMenu,matchSetBlock,matchNoBlocks,matchResolveBlocks,matchPromptX,matchPlayX,matchSendRemoval,
   copyMyCode,shareMyCode,addFriend,removeFriend,playWithFriend});
 
 render();
