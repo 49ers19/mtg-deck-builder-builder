@@ -1740,7 +1740,7 @@ function matchBoardMenu(iid){ const M=state.match,m=M.me,c=m.board.find(x=>x.iid
   const inCombat=(M.amHost===M.turnHost) && MATCH_PHASES[m.phase||0]==='Combat';
   const isCmdCard=c.isCmd||c.cardId===m.cmd;
   let o='';
-  if(producesMana(cd) && !c.tapped) o+=`<button class="btn gold full" onclick="matchTapForMana('${iid}')">🔵 Tap for mana</button>`;
+  if(manaAbilities(cd).length && !c.tapped) o+=`<button class="btn gold full" onclick="matchTapForMana('${iid}')">🔵 Tap for mana</button>`;
   if(inCombat && isCreatureType(cd)) o+=`<button class="btn ${c.atk?'':'gold'} full" style="margin-top:6px" onclick="matchToggleAttacker('${iid}')">${c.atk?'Cancel attack':'⚔ Attack with this'}</button>`;
   o+=`<button class="btn full" style="margin-top:6px" onclick="matchTapBoard('${iid}')">${c.tapped?'Untap':'Tap'}</button>`;
   if(cardHasAbility(cd)) o+=`<button class="btn gold full" style="margin-top:6px" onclick="matchUseAbility('${iid}')">✨ Use ability</button>`;
@@ -1755,19 +1755,40 @@ function matchToGrave(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid
 function matchToExile(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(c){ if(!c.token && c.cardId!=null) m.exile.push(c.cardId); m.board=m.board.filter(x=>x.iid!==iid); } publishMatch(); closeModal(); renderPlay(); }
 function matchToHand(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(c){ if(!c.token && c.cardId!=null) m.hand.push(c.cardId); m.board=m.board.filter(x=>x.iid!==iid); } publishMatch(); closeModal(); renderPlay(); }
 function matchUseAbility(iid){ const c=state.match.me.board.find(x=>x.iid===iid); closeModal(); if(c && c.cardId!=null) matchResolveEffects(c.cardId); publishMatch(); renderPlay(); }
-// ---- mana ----
-function matchTapForMana(iid){
-  const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(!c) return; const cd=card(c.cardId);
+// ---- mana abilities: parsed from each card's own oracle text ----
+function parseManaOutput(s){ s=(s||'').trim();
+  let m=s.match(/(one|two|three|four|\d+)\s+mana\s+of\s+any\s+one\s+color/i); if(m) return {kind:'anyOne', count:wordNum(m[1].toLowerCase())};
+  m=s.match(/(one|two|three|four|\d+)?\s*mana\s+of\s+any\s+color/i); if(m) return {kind:'any', count:m[1]?wordNum(m[1].toLowerCase()):1};
+  const syms=(s.match(/\{[WUBRGC]\}/gi)||[]).map(x=>x.slice(1,-1).toUpperCase());
+  if(!syms.length) return null;
+  if(/\bor\b/i.test(s) && [...new Set(syms)].length>1) return {kind:'choice', options:[...new Set(syms)], count:1};
+  return {kind:'fixed', mana:syms}; }
+function manaAbilities(cd){ const out=[]; const text=(cd&&cd.text)||'';
+  text.split('\n').forEach(line=>{ const m=line.match(/^(.*?):\s*add\s+(.+?)(?:\.|$)/i); if(!m) return; if(!/\{t\}/i.test(m[1])) return;
+    const o=parseManaOutput(m[2]); if(!o) return; out.push({cost:parseCost(m[1].replace(/\{[tq]\}/ig,'')), out:o, label:line.trim()}); });
+  if(!out.length){ const cols=(cd&&cd.produced&&cd.produced.length)?[...new Set(cd.produced.map(x=>MANA_COLORS.includes(x)?x:'C'))]:(isLandCard(cd)?['C']:null);
+    if(cols) out.push({cost:parseCost(''), out: cols.length>1?{kind:'choice',options:cols,count:1}:{kind:'fixed',mana:[cols[0]]}, label:'{T}: Add '+cols.map(c=>'{'+c+'}').join(' or ')}); }
+  return out; }
+function manaCostText(need){ let s=''; if(need.generic) s+='{'+need.generic+'}'; MANA_COLORS.forEach(c=>{ for(let i=0;i<(need[c]||0);i++) s+='{'+c+'}'; }); return s||'{0}'; }
+function matchTapForMana(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(!c) return; const cd=card(c.cardId);
   if(c.tapped){ toast('Already tapped'); return; }
-  if(!producesMana(cd)){ toast('That doesn’t make mana'); return; }
   if(isCreatureType(cd) && c.sick){ toast('💤 Summoning sick — can’t tap until your next turn'); return; }
-  let cols=(cd.produced&&cd.produced.length)?cd.produced.slice():(cd.colors&&cd.colors.length?cd.colors.slice():['C']);
-  cols=[...new Set(cols.map(x=>MANA_COLORS.includes(x)?x:'C'))];
-  if(cols.length<=1){ matchAddMana(iid, cols[0]||'C'); return; }
+  const abils=manaAbilities(cd); if(!abils.length){ toast('That doesn’t make mana'); return; }
+  if(abils.length===1){ matchActivateMana(iid,0); return; }
   closeModal();
-  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Tap for which mana?</h3>${cols.map(x=>`<button class="btn full" style="margin-bottom:6px" onclick="matchAddMana('${iid}','${x}')">${x}</button>`).join('')}<button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div>`;
-}
-function matchAddMana(iid,color){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(!c||c.tapped){ closeModal(); return; } c.tapped=true; m.pool[color]=(m.pool[color]||0)+1; closeModal(); publishMatch(); renderPlay(); }
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>Which mana ability?</h3>${abils.map((a,i)=>`<button class="btn full" style="margin-bottom:6px" onclick="matchActivateMana('${iid}',${i})">${esc(a.label)}</button>`).join('')}<button class="btn ghost full" onclick="closeModal()">Cancel</button></div></div>`; }
+function matchActivateMana(iid,ai){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(!c||c.tapped){ closeModal(); return; } const cd=card(c.cardId),ab=manaAbilities(cd)[ai]; if(!ab){ closeModal(); return; }
+  const costTotal=(ab.cost.generic||0)+MANA_COLORS.reduce((s,x)=>s+(ab.cost[x]||0),0);
+  if(costTotal>0){ if(!poolCanPay(m.pool,ab.cost)){ toast('Need '+manaCostText(ab.cost)+' in your pool to activate — tap a land first'); return; } poolPay(m.pool,ab.cost); }
+  c.tapped=true; closeModal();
+  const o=ab.out;
+  if(o.kind==='fixed'){ o.mana.forEach(col=>m.pool[col]=(m.pool[col]||0)+1); publishMatch(); renderPlay(); toast('Added '+o.mana.map(x=>'{'+x+'}').join('')); return; }
+  state.match._mana={ need:o.count||1, options:o.kind==='choice'?o.options:MANA_COLORS.slice(), same:o.kind==='anyOne', first:null };
+  matchManaColorPrompt(); }
+function matchManaColorPrompt(){ const mm=state.match._mana; if(!mm){ return; } if(mm.need<=0){ state.match._mana=null; publishMatch(); renderPlay(); return; }
+  const opts=(mm.same&&mm.first)?[mm.first]:mm.options;
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this){state.match._mana=null;closeModal();renderPlay();}"><div class="modal"><h3>Add mana — choose a color${mm.need>1?' ('+mm.need+' left)':''}</h3>${opts.map(col=>`<button class="btn full" style="margin-bottom:6px" onclick="matchPickMana('${col}')">{${col}}</button>`).join('')}</div></div>`; }
+function matchPickMana(col){ const m=state.match.me,mm=state.match._mana; if(!mm) return; m.pool[col]=(m.pool[col]||0)+1; if(mm.same&&!mm.first) mm.first=col; mm.need--; if(mm.need<=0){ state.match._mana=null; closeModal(); publishMatch(); renderPlay(); toast('Mana added'); } else matchManaColorPrompt(); }
 function matchEmptyPool(){ state.match.me.pool=emptyPool(); renderPlay(); }
 // ---- turn structure / phases ----
 const MATCH_PHASES=['Untap','Upkeep','Draw','Main 1','Combat','Main 2','End'];
@@ -2858,7 +2879,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   openShare,joinRoom,leaveSession,copyShare,startMatchmaking,cancelMatchmaking,
   matchPickDeck,matchDraw,matchMulligan,matchPlay,matchLife,matchBoardMenu,matchTapBoard,matchToGrave,matchToExile,matchToHand,matchUseAbility,matchRoll,matchBegin,matchEndTurn,exitMatch,
   matchResolveEffects,matchPickChoice,matchCancelChoice,matchZoneView,
-  matchTapForMana,matchAddMana,matchEmptyPool,matchNextPhase,matchCastCommander,matchCmdToZone,matchToggleAttacker,matchDeclareAttack,
+  matchTapForMana,matchActivateMana,matchPickMana,matchEmptyPool,matchNextPhase,matchCastCommander,matchCmdToZone,matchToggleAttacker,matchDeclareAttack,
   matchBlockMenu,matchSetBlock,matchNoBlocks,matchResolveBlocks,matchPromptX,matchPlayX,matchSendRemoval,
   matchResolveSpell,matchRespondPass,matchRespondInstant,matchCastResponse,
   copyMyCode,shareMyCode,addFriend,removeFriend,playWithFriend});
