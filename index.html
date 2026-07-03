@@ -439,7 +439,7 @@ const card = id => state.cards[id];
 // ---------- Toast ----------
 let toastT;
 function toast(msg){
-  toastRoot.innerHTML = `<div class="toast">${msg}</div>`;
+  toastRoot.innerHTML=''; const d=document.createElement('div'); d.className='toast'; d.textContent=String(msg==null?'':msg); toastRoot.appendChild(d);
   clearTimeout(toastT); toastT = setTimeout(()=>toastRoot.innerHTML='',1600);
 }
 
