@@ -106,6 +106,26 @@ nav button.active .ic{opacity:1}
 .pricecell{flex:1;min-width:72px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:8px;text-align:center}
 .pricecell .pl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
 .pricecell .pv{font-size:16px;font-weight:600;color:var(--accent2);margin-top:2px}
+.mcard{width:248px;border-radius:13px;padding:9px;background:var(--mf-deep);border:1px solid rgba(0,0,0,.6);box-shadow:0 6px 22px rgba(0,0,0,.5);color:#17150f}
+.mcard-white{--mf:#f7f3e2;--mf-deep:#c9be93}.mcard-blue{--mf:#cfe4f2;--mf-deep:#5f92b3}.mcard-black{--mf:#d6d0c9;--mf-deep:#4b473f}
+.mcard-red{--mf:#f3cbb6;--mf-deep:#b35c3d}.mcard-green{--mf:#cfe3c3;--mf-deep:#527d47}.mcard-gold{--mf:#f0e4b4;--mf-deep:#b39a4d}
+.mcard-artifact{--mf:#dfe2e6;--mf-deep:#7f858d}.mcard-land{--mf:#e2d3ba;--mf-deep:#8c7458}
+.mc-title,.mc-type{display:flex;justify-content:space-between;align-items:center;gap:6px;background:var(--mf);border:1px solid rgba(0,0,0,.35);border-radius:7px;padding:5px 9px;font-weight:600}
+.mc-title{margin-bottom:6px}.mc-type{margin-bottom:6px;font-size:12px}
+.mc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.mc-cost{display:flex;gap:2px;flex:none}
+.mpip{width:19px;height:19px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#17150f;border:1px solid rgba(0,0,0,.4)}
+.mpip-W{background:#f7f3d8}.mpip-U{background:#a9d3ef}.mpip-B{background:#c7bfb7}.mpip-R{background:#eea886}.mpip-G{background:#a7cf9c}.mpip-C{background:#cdc9c0}
+.mc-art{height:150px;background:#20222b center/cover;border:1px solid rgba(0,0,0,.4);border-radius:5px;margin-bottom:6px;display:flex;align-items:center;justify-content:center}
+.mc-artph{color:#8a8f99;font-size:11px;text-transform:uppercase;letter-spacing:3px}
+.mc-textbox{background:var(--mf);border:1px solid rgba(0,0,0,.35);border-radius:7px;padding:8px 9px;min-height:66px;font-size:12.5px;line-height:1.35}
+.mc-flavor{font-style:italic;opacity:.82;margin-top:6px;border-top:1px solid rgba(0,0,0,.15);padding-top:6px}
+.mc-bottom{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:9px;color:rgba(255,255,255,.85);padding:0 3px;letter-spacing:.3px}
+.mc-pt{background:var(--mf);border:1px solid rgba(0,0,0,.4);border-radius:6px;padding:2px 10px;font-weight:700;color:#17150f;font-size:15px}
+.mcard-sm{width:100%;padding:6px;font-size:9px;box-shadow:none}
+.mcard-sm .mc-art{height:84px}.mcard-sm .mpip{width:13px;height:13px;font-size:8px}.mcard-sm .mc-name{font-size:10px}.mcard-sm .mc-textbox{min-height:34px;font-size:9px;padding:5px 6px}.mcard-sm .mc-pt{font-size:11px;padding:1px 6px}.mcard-sm .mc-type{font-size:9px}
+.design-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.dg-item{display:flex;flex-direction:column;align-items:stretch}
 
 /* Deck list items */
 .decktile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;transition:border-color .12s}
@@ -343,6 +363,7 @@ body{transition:background-image .3s}
   <button data-tab="play">Play</button>
   <button data-tab="friends">Friends</button>
   <button data-tab="analyze">Analyze</button>
+  <button data-tab="design">Design</button>
 </nav>
 
 <div id="modalRoot"></div>
@@ -408,6 +429,8 @@ const state = {
   analyzeOwnedOnly: false,
   meta: null, metaDeck: null,
   buyStore: (localStorage.getItem('pdb_store')||'tcg'),
+  customCards: (function(){ try{ return JSON.parse(localStorage.getItem('pdb_customcards')||'[]'); }catch(e){ return []; } })(),
+  designerDraft: null,
   user: null,
 };
 
@@ -481,6 +504,7 @@ function render(){
   else if(state.tab==='play') renderPlay();
   else if(state.tab==='friends') renderFriends();
   else if(state.tab==='analyze') renderAnalyze();
+  else if(state.tab==='design') renderDesign();
   $('#subtitle').textContent = ({
     decks:'Your decks', search:'Find cards on Scryfall', collection:'Cards you own', play:'Life counter & playtest', friends:'Play with your friends', analyze:'Deck analysis'
   })[state.tab] || '';
@@ -781,6 +805,59 @@ async function openMetaDeck(slug, name){
   if(state.tab==='meta') renderMeta();
 }
 function closeMetaDeck(){ state.metaDeck=null; renderMeta(); }
+
+// ---------- CARD DESIGNER (display-only custom cards) ----------
+function blankDraft(){ return {id:null, name:'', cost:'', type:'', text:'', flavor:'', pt:'', art:'', frame:'artifact'}; }
+function saveCustomCards(){ try{ localStorage.setItem('pdb_customcards', JSON.stringify(state.customCards)); }catch(e){ toast('Storage full — delete a card or use smaller art'); } }
+function manaPips(cost){ const s=(cost||'').replace(/[{}]/g,'').toUpperCase(); const syms=(s.match(/\d+|[WUBRGCXS]/g)||[]);
+  return syms.map(x=>{ const cls=/^[WUBRG]$/.test(x)?x:(x==='C'?'C':'C'); return `<span class="mpip mpip-${cls}">${esc(x)}</span>`; }).join(''); }
+function cardPreviewHTML(c, small){
+  const cls='mcard mcard-'+(c.frame||'artifact')+(small?' mcard-sm':'');
+  const isCreature=/creature/i.test(c.type||'')||!!c.pt;
+  const rules=esc(c.text||'').replace(/\n/g,'<br>');
+  const flavor=c.flavor?esc(c.flavor).replace(/\n/g,'<br>'):'';
+  return `<div class="${cls}">
+    <div class="mc-title"><span class="mc-name">${esc(c.name||'—')}</span><span class="mc-cost">${manaPips(c.cost)}</span></div>
+    <div class="mc-art"${c.art?` style="background-image:url('${c.art}')"`:''}>${c.art?'':'<span class="mc-artph">art</span>'}</div>
+    <div class="mc-type"><span>${esc(c.type||'Type line')}</span></div>
+    <div class="mc-textbox"><div class="mc-rules">${rules||'<span style="opacity:.4">Rules text</span>'}</div>${flavor?`<div class="mc-flavor">${flavor}</div>`:''}</div>
+    <div class="mc-bottom"><span class="mc-cred">custom · not for play</span>${(isCreature&&c.pt)?`<span class="mc-pt">${esc(c.pt)}</span>`:''}</div>
+  </div>`;
+}
+function renderDesign(){
+  const d=state.designerDraft||(state.designerDraft=blankDraft());
+  const frames=[['white','White'],['blue','Blue'],['black','Black'],['red','Red'],['green','Green'],['gold','Multicolor'],['artifact','Artifact'],['land','Land']];
+  let h=`<div class="section-title">Card designer</div>
+    <div class="tiny muted" style="margin:-4px 2px 12px">Make custom cards for fun — display-only, they don’t affect your decks, collection or play.</div>
+    <div id="cardPreview" style="display:flex;justify-content:center;margin-bottom:16px">${cardPreviewHTML(d)}</div>
+    <label class="btn ghost full" style="margin-bottom:12px;cursor:pointer">${d.art?'Change art image':'Add art image'}<input type="file" accept="image/*" style="display:none" onchange="designArt(this)"></label>
+    <div class="field"><label>Card name</label><input class="scan-input" value="${esc(d.name)}" oninput="designField('name',this.value)" placeholder="Name" autocomplete="off"></div>
+    <div class="row" style="gap:8px">
+      <div class="field" style="flex:1"><label>Mana cost</label><input class="scan-input" value="${esc(d.cost)}" oninput="designField('cost',this.value)" placeholder="2WU" autocomplete="off"></div>
+      <div class="field" style="flex:1"><label>Power/Toughness</label><input class="scan-input" value="${esc(d.pt)}" oninput="designField('pt',this.value)" placeholder="3/3" autocomplete="off"></div>
+    </div>
+    <div class="field"><label>Type line</label><input class="scan-input" value="${esc(d.type)}" oninput="designField('type',this.value)" placeholder="Legendary Creature — Wizard" autocomplete="off"></div>
+    <div class="field"><label>Rules text</label><textarea class="imp-text" style="min-height:74px" oninput="designField('text',this.value)" placeholder="Flying, vigilance…">${esc(d.text)}</textarea></div>
+    <div class="field"><label>Flavor text</label><textarea class="imp-text" style="min-height:48px" oninput="designField('flavor',this.value)" placeholder="A memorable quote…">${esc(d.flavor)}</textarea></div>
+    <div class="field"><label>Frame</label><div class="row" style="flex-wrap:wrap;gap:6px">${frames.map(f=>`<button class="pc-btn ${d.frame===f[0]?'on':''}" onclick="setDesignFrame('${f[0]}')">${f[1]}</button>`).join('')}</div></div>
+    <div class="row" style="gap:8px;margin:6px 0 18px"><button class="btn gold full" onclick="saveDesignCard()">${d.id?'Update card':'Save card'}</button><button class="btn full" onclick="newDesignCard()">New</button></div>`;
+  if(state.customCards.length){ h+=`<div class="section-title">Your cards (${state.customCards.length})</div><div class="design-gallery">${state.customCards.map(c=>`<div class="dg-item"><div onclick="editDesignCard('${c.id}')" style="cursor:pointer">${cardPreviewHTML(c,true)}</div><button class="btn sm danger" style="margin-top:6px" onclick="deleteDesignCard('${c.id}')">Delete</button></div>`).join('')}</div>`; }
+  main.innerHTML=h;
+}
+function updateDesignPreview(){ const el=$('#cardPreview'); if(el) el.innerHTML=cardPreviewHTML(state.designerDraft); }
+function designField(k,v){ if(!state.designerDraft) state.designerDraft=blankDraft(); state.designerDraft[k]=v; updateDesignPreview(); }
+function setDesignFrame(f){ if(!state.designerDraft) state.designerDraft=blankDraft(); state.designerDraft.frame=f; renderDesign(); }
+function designArt(input){ const f=input&&input.files&&input.files[0]; if(!f) return; const r=new FileReader();
+  r.onload=()=>{ const img=new Image(); img.onload=()=>{ const max=620; let w=img.width,h=img.height; if(w>max){ h=Math.round(h*max/w); w=max; } const cv=document.createElement('canvas'); cv.width=w; cv.height=h; cv.getContext('2d').drawImage(img,0,0,w,h); state.designerDraft.art=cv.toDataURL('image/jpeg',0.82); updateDesignPreview(); };
+    img.onerror=()=>toast('Couldn’t read that image'); img.src=String(r.result); };
+  r.readAsDataURL(f); }
+function saveDesignCard(){ const d=state.designerDraft; if(!d||!d.name.trim()){ toast('Give your card a name first'); return; }
+  if(d.id){ const i=state.customCards.findIndex(c=>c.id===d.id); if(i>=0) state.customCards[i]={...d}; else state.customCards.unshift({...d}); }
+  else { d.id=uid(); state.customCards.unshift({...d}); }
+  saveCustomCards(); toast('Card saved'); renderDesign(); }
+function newDesignCard(){ state.designerDraft=blankDraft(); renderDesign(); }
+function editDesignCard(id){ const c=state.customCards.find(x=>x.id===id); if(c){ state.designerDraft={...c}; renderDesign(); window.scrollTo(0,0); } }
+function deleteDesignCard(id){ if(!confirm('Delete this custom card?')) return; state.customCards=state.customCards.filter(c=>c.id!==id); if(state.designerDraft&&state.designerDraft.id===id) state.designerDraft=blankDraft(); saveCustomCards(); renderDesign(); }
 function renderMetaDeck(){
   const d=state.metaDeck;
   let head=`<div class="detail-head"><button class="back" onclick="closeMetaDeck()">‹</button><div class="ttl">${esc(d.name)}</div></div>`;
@@ -2998,7 +3075,8 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,mtgoFilePicked,openBgPicker,setBg,
-  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,loadMeta,openMetaDeck,closeMetaDeck,installApp,
+  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,loadMeta,openMetaDeck,closeMetaDeck,
+  designArt,designField,setDesignFrame,saveDesignCard,newDesignCard,editDesignCard,deleteDesignCard,installApp,
   startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
