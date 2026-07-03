@@ -1745,15 +1745,9 @@ function matchBoardMenu(iid){ const M=state.match,m=M.me,c=m.board.find(x=>x.iid
   o+=`<button class="btn full" style="margin-top:6px" onclick="matchTapBoard('${iid}')">${c.tapped?'Untap':'Tap'}</button>`;
   if(cardHasAbility(cd)) o+=`<button class="btn gold full" style="margin-top:6px" onclick="matchUseAbility('${iid}')">✨ Use ability</button>`;
   if(isCmdCard) o+=`<button class="btn full" style="margin-top:6px" onclick="matchCmdToZone('${iid}')">👑 To command zone</button>`;
-  o+=`<button class="btn full" style="margin-top:6px" onclick="matchToGrave('${iid}')">Send to graveyard</button>`;
-  o+=`<button class="btn full" style="margin-top:6px" onclick="matchToExile('${iid}')">Exile</button>`;
-  if(!c.token && !isCmdCard) o+=`<button class="btn full" style="margin-top:6px" onclick="matchToHand('${iid}')">Return to hand</button>`;
   o+=`<button class="btn ghost full" style="margin-top:6px" onclick="closeModal()">Close</button>`;
   modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><h3>${nm}${c.tapped?' <span class="tiny muted">tapped</span>':''}${c.sick?' 💤':''}</h3>${o}</div></div>`; }
 function matchTapBoard(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(c){ c.tapped=!c.tapped; publishMatch(); } closeModal(); renderPlay(); }
-function matchToGrave(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(c){ if(!c.token && c.cardId!=null) m.gy.push(c.cardId); m.board=m.board.filter(x=>x.iid!==iid); } publishMatch(); closeModal(); renderPlay(); }
-function matchToExile(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(c){ if(!c.token && c.cardId!=null) m.exile.push(c.cardId); m.board=m.board.filter(x=>x.iid!==iid); } publishMatch(); closeModal(); renderPlay(); }
-function matchToHand(iid){ const m=state.match.me,c=m.board.find(x=>x.iid===iid); if(c){ if(!c.token && c.cardId!=null) m.hand.push(c.cardId); m.board=m.board.filter(x=>x.iid!==iid); } publishMatch(); closeModal(); renderPlay(); }
 function matchUseAbility(iid){ const c=state.match.me.board.find(x=>x.iid===iid); closeModal(); if(c && c.cardId!=null) matchResolveEffects(c.cardId); publishMatch(); renderPlay(); }
 // ---- mana abilities: parsed from each card's own oracle text ----
 function parseManaOutput(s){ s=(s||'').trim();
@@ -2880,7 +2874,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
   setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,cancelTarget,applyTargetOpponent,applyTargetTo,lethalDamage,
   openShare,joinRoom,leaveSession,copyShare,startMatchmaking,cancelMatchmaking,
-  matchPickDeck,matchDraw,matchMulligan,matchPlay,matchLife,matchBoardMenu,matchTapBoard,matchToGrave,matchToExile,matchToHand,matchUseAbility,matchRoll,matchBegin,matchEndTurn,exitMatch,
+  matchPickDeck,matchDraw,matchMulligan,matchPlay,matchLife,matchBoardMenu,matchTapBoard,matchUseAbility,matchRoll,matchBegin,matchEndTurn,exitMatch,
   matchResolveEffects,matchPickChoice,matchCancelChoice,matchZoneView,
   matchTapForMana,matchActivateMana,matchPickMana,matchEmptyPool,matchNextPhase,matchCastCommander,matchCmdToZone,matchToggleAttacker,matchDeclareAttack,
   matchBlockMenu,matchSetBlock,matchNoBlocks,matchResolveBlocks,matchPromptX,matchPlayX,matchSendRemoval,
