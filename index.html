@@ -395,6 +395,7 @@ const state = {
   analyzeRecs: {},
   analyzeOwnedOnly: false,
   meta: null, metaDeck: null,
+  buyStore: (localStorage.getItem('pdb_store')||'tcg'),
   user: null,
 };
 
@@ -716,6 +717,20 @@ function ckLink(cd){ return 'https://www.cardkingdom.com/catalog/search?search=h
 function tcgMassLink(names){ return 'https://www.tcgplayer.com/massentry?productline=Magic&c='+encodeURIComponent((names||[]).map(n=>'1 '+n).join('||')); }
 function addToWishlist(cardId){ const c=state._resultMap&&state._resultMap[cardId]; if(c) cacheCard(c); state.wishlist[cardId]=1; DB.save(); toast('Added to wishlist'); }
 function removeWishlist(cardId){ delete state.wishlist[cardId]; DB.save(); renderCollection(); }
+function setBuyStore(s){ state.buyStore=(s==='ck'?'ck':'tcg'); try{ localStorage.setItem('pdb_store',state.buyStore); }catch(e){} renderCollection(); }
+function buyAllStore(){
+  const ids=Object.keys(state.wishlist).filter(id=>state.wishlist[id]);
+  const names=ids.map(id=>(card(id)||{}).name).filter(Boolean);
+  if(!names.length){ toast('Wishlist is empty'); return; }
+  if(state.buyStore==='ck'){
+    window.open('https://www.cardkingdom.com/builder','_blank','noopener');
+    const list=names.map(n=>'1 '+n).join('\n');
+    if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(list).then(()=>toast('Wishlist copied — paste it into Card Kingdom’s deck builder')).catch(()=>{});
+    else toast('Opened Card Kingdom — search your cards there');
+  } else {
+    window.open(tcgMassLink(names),'_blank','noopener');
+  }
+}
 
 // ---------- META: most-played commanders (via EDHREC) + how much of each you own ----------
 async function loadMeta(){
@@ -781,15 +796,18 @@ function wishlistHTML(){
       <div class="stat"><div class="v">$${val.toFixed(0)}</div><div class="l">Est. Cost</div></div>
     </div>`;
   if(!ids.length){ h+=`<div class="empty"><div class="t">Wishlist is empty</div><div class="tiny">From Search, tap a card → Wishlist.</div><button class="btn gold full" style="margin-top:16px" onclick="setTab('search')">Find cards</button></div>`; return h; }
-  const names=ids.map(id=>card(id)&&card(id).name).filter(Boolean);
-  h+=`<div class="row" style="gap:8px;margin-bottom:12px"><a class="btn gold full" href="${tcgMassLink(names)}" target="_blank" rel="noopener">Buy all on TCGplayer</a><a class="btn full" href="https://www.cardkingdom.com/builder" target="_blank" rel="noopener">Card Kingdom</a></div>`;
+  const store=state.buyStore==='ck'?'ck':'tcg';
+  const storeLabel=store==='ck'?'Card Kingdom':'TCGplayer';
+  h+=`<div class="play-ctrl" style="margin-bottom:12px"><div class="pc-group"><span class="pc-lbl">Buy on</span>
+      <button class="pc-btn ${store==='tcg'?'on':''}" onclick="setBuyStore('tcg')">TCGplayer</button>
+      <button class="pc-btn ${store==='ck'?'on':''}" onclick="setBuyStore('ck')">Card Kingdom</button></div></div>`;
+  h+=`<button class="btn gold full" style="margin-bottom:12px" onclick="buyAllStore()">Buy all on ${storeLabel}</button>`;
   h+=`<div class="section-title">Most Wanted (${ids.length})</div>`;
   ids.forEach(id=>{ const c=card(id); if(!c) return;
     h+=`<div class="cardrow">
       <div class="thumb" style="background-image:url('${c.thumb||''}')" onclick="showCard('${id}')"></div>
       <div class="info" onclick="showCard('${id}')"><div class="nm">${esc(c.name)}</div><div class="meta">${esc(shortType(c.type_line))}${c.price?' · $'+c.price:''}</div></div>
-      <a class="btn gold sm" href="${tcgLink(c)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">TCG</a>
-      <a class="btn sm" href="${ckLink(c)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">CK</a>
+      <a class="btn gold sm" href="${store==='ck'?ckLink(c):tcgLink(c)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Buy</a>
       <button class="iconbtn" onclick="removeWishlist('${id}')">✕</button>
     </div>`;
   });
@@ -2963,7 +2981,7 @@ document.querySelectorAll('nav button').forEach(b=>{
 // expose for inline handlers
 Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQty,collQty,
   addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,pickVariant,cardViewAdd,
-  setCollMode,addToWishlist,removeWishlist,
+  setCollMode,addToWishlist,removeWishlist,setBuyStore,buyAllStore,
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,scanAdd,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
