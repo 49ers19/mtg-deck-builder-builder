@@ -2178,13 +2178,16 @@ async function loadPrecons(){
   try{ const r=await fetch('precons.json'); if(r.ok) PRECONS=await r.json(); }catch(e){}
   if(!PRECONS.length) PRECONS=PRECONS_SEED;
 }
+const SET_LABELS={ MSC:'Marvel Super Heroes Commander', MSH:'Marvel Super Heroes', SPM:'Marvel’s Spider-Man', SLD:'Secret Lair' };
 function renderPreconList(q){
   const el=$('#preconList'); if(!el) return;
   if(!PRECONS.length){ el.innerHTML='<div class="tiny muted" style="padding:9px">Couldn’t load precons (needs internet the first time).</div>'; return; }
   q=(q||'').toLowerCase().trim();
   const rows=[];
   for(let i=0;i<PRECONS.length && rows.length<60;i++){
-    if(!q || PRECONS[i].name.toLowerCase().includes(q)) rows.push(`<button class="precon-row" onclick="loadPrecon(${i})"><span>🏰 ${esc(PRECONS[i].name)}</span><span class="tiny muted">${esc(PRECONS[i].set||'')}</span></button>`);
+    const p=PRECONS[i]; const label=SET_LABELS[p.set]||p.set||'';
+    const hay=(p.name+' '+label+' '+(p.set||'')).toLowerCase();
+    if(!q || hay.includes(q)) rows.push(`<button class="precon-row" onclick="loadPrecon(${i})"><span>🏰 ${esc(p.name)}</span><span class="tiny muted">${esc(label)}</span></button>`);
   }
   el.innerHTML = rows.join('') || '<div class="tiny muted" style="padding:9px">No precon matches.</div>';
 }
