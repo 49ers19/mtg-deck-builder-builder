@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="20" fill="#0d0f1a"/>
+  <circle cx="50" cy="50" r="43" fill="none" stroke="#c9a227" stroke-width="2.2"/>
+  <circle cx="50" cy="50" r="37.5" fill="none" stroke="#e3c14b" stroke-width="1" stroke-dasharray="0.7 3" opacity="0.85"/>
+  <polygon points="50,23 76,42 66,72 34,72 24,42" fill="none" stroke="#c9a227" stroke-width="0.9" opacity="0.45"/>
+  <polygon points="50,23 66,72 24,42 76,42 34,72" fill="none" stroke="#c9a227" stroke-width="0.9" opacity="0.45"/>
+  <polygon points="50,44 56,50 50,56 44,50" fill="#e3c14b" stroke="#c9a227" stroke-width="0.8"/>
+  <circle cx="50" cy="23" r="6.8" fill="#f4efd8" stroke="#c9a227" stroke-width="1"/>
+  <circle cx="76" cy="42" r="6.8" fill="#3a6ea5" stroke="#c9a227" stroke-width="1"/>
+  <circle cx="66" cy="72" r="6.8" fill="#1b1b24" stroke="#c9a227" stroke-width="1"/>
+  <circle cx="34" cy="72" r="6.8" fill="#a23c30" stroke="#c9a227" stroke-width="1"/>
+  <circle cx="24" cy="42" r="6.8" fill="#2f7d55" stroke="#c9a227" stroke-width="1"/>
+</svg>

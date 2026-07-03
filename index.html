@@ -10,6 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Grimoire">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="icon" type="image/png" href="icon-192.png">
 <title>Grimoire Games — MTG Deck Builder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -38,7 +39,7 @@ input{font-family:inherit}
 /* Header */
 header{padding:calc(env(safe-area-inset-top) + 15px) 16px 13px;background:#101119;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
 .brand{font-size:19px;font-weight:600;letter-spacing:.4px;color:var(--accent2);display:flex;align-items:center;gap:9px}
-.brand .gem{width:13px;height:13px;transform:rotate(45deg);background:var(--accent2);border-radius:2px}
+.brand-mark{flex:none;display:block}
 .sub{font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:.2px}
 .hdr-actions{position:absolute;top:calc(env(safe-area-inset-top) + 14px);right:12px;display:flex;gap:6px}
 .hdr-btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s}
@@ -312,7 +313,18 @@ body{transition:background-image .3s}
 </head>
 <body>
 <header>
-  <div class="brand"><span class="gem"></span>Grimoire Games</div>
+  <div class="brand"><svg class="brand-mark" viewBox="0 0 100 100" width="30" height="30" aria-hidden="true">
+    <circle cx="50" cy="50" r="47" fill="none" stroke="#c9a227" stroke-width="2.4"/>
+    <circle cx="50" cy="50" r="41" fill="none" stroke="#e3c14b" stroke-width="1" stroke-dasharray="0.7 3" opacity="0.85"/>
+    <polygon points="50,20 78.5,40.7 67.6,74.3 32.4,74.3 21.5,40.7" fill="none" stroke="#c9a227" stroke-width="0.9" opacity="0.45"/>
+    <polygon points="50,20 67.6,74.3 21.5,40.7 78.5,40.7 32.4,74.3" fill="none" stroke="#c9a227" stroke-width="0.9" opacity="0.45"/>
+    <polygon points="50,42 57,50 50,58 43,50" fill="#e3c14b" stroke="#c9a227" stroke-width="0.8"/>
+    <circle cx="50" cy="20" r="7.5" fill="#f4efd8" stroke="#c9a227" stroke-width="1"/>
+    <circle cx="78.5" cy="40.7" r="7.5" fill="#3a6ea5" stroke="#c9a227" stroke-width="1"/>
+    <circle cx="67.6" cy="74.3" r="7.5" fill="#1b1b24" stroke="#c9a227" stroke-width="1"/>
+    <circle cx="32.4" cy="74.3" r="7.5" fill="#a23c30" stroke="#c9a227" stroke-width="1"/>
+    <circle cx="21.5" cy="40.7" r="7.5" fill="#2f7d55" stroke="#c9a227" stroke-width="1"/>
+  </svg>Grimoire Games</div>
   <div class="sub" id="subtitle">Magic: The Gathering deck builder &amp; collection</div>
   <div class="hdr-actions">
     <a href="https://discord.gg/EMkDaZKH2" target="_blank" rel="noopener" class="hdr-btn disc" title="Join our Discord">Discord</a>
