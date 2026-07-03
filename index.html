@@ -431,6 +431,8 @@ const state = {
   buyStore: (localStorage.getItem('pdb_store')||'tcg'),
   customCards: (function(){ try{ return JSON.parse(localStorage.getItem('pdb_customcards')||'[]'); }catch(e){ return []; } })(),
   designerDraft: null,
+  cardSkins: (function(){ try{ return JSON.parse(localStorage.getItem('pdb_skins')||'{}'); }catch(e){ return {}; } })(),
+  designMode: 'custom', reskinDraft: null, reskinQuery: '',
   user: null,
 };
 
@@ -829,10 +831,16 @@ function cardPreviewHTML(c, small){
   </div>`;
 }
 function renderDesign(){
+  const mode=state.designMode||'custom';
+  const modeBar=`<div class="section-title">Card designer</div>
+    <div class="play-ctrl" style="margin-bottom:12px"><div class="pc-group">
+      <button class="pc-btn ${mode==='custom'?'on':''}" onclick="setDesignMode('custom')">New card</button>
+      <button class="pc-btn ${mode==='reskin'?'on':''}" onclick="setDesignMode('reskin')">Reskin a card</button>
+    </div></div>`;
+  if(mode==='reskin') return renderReskin(modeBar);
   const d=state.designerDraft||(state.designerDraft=blankDraft());
   const frames=[['white','White'],['blue','Blue'],['black','Black'],['red','Red'],['green','Green'],['gold','Multicolor'],['artifact','Artifact'],['land','Land']];
-  let h=`<div class="section-title">Card designer</div>
-    <div class="tiny muted" style="margin:-4px 2px 12px">Make custom cards for fun — display-only, they don’t affect your decks, collection or play.</div>
+  let h=modeBar+`<div class="tiny muted" style="margin:-4px 2px 12px">Make a card from scratch for fun — display-only, doesn’t affect play.</div>
     <div id="cardPreview" style="display:flex;justify-content:center;margin-bottom:16px">${cardPreviewHTML(d)}</div>
     <label class="btn ghost full" style="margin-bottom:12px;cursor:pointer">${d.art?'Change art image':'Add art image'}<input type="file" accept="image/*" style="display:none" onchange="designArt(this)"></label>
     <div class="field"><label>Card name</label><input class="scan-input" value="${esc(d.name)}" oninput="designField('name',this.value)" placeholder="Name" autocomplete="off"></div>
@@ -862,6 +870,46 @@ function saveDesignCard(){ const d=state.designerDraft; if(!d||!d.name.trim()){ 
 function newDesignCard(){ state.designerDraft=blankDraft(); renderDesign(); }
 function editDesignCard(id){ const c=state.customCards.find(x=>x.id===id); if(c){ state.designerDraft={...c}; renderDesign(); window.scrollTo(0,0); } }
 function deleteDesignCard(id){ if(!confirm('Delete this custom card?')) return; state.customCards=state.customCards.filter(c=>c.id!==id); if(state.designerDraft&&state.designerDraft.id===id) state.designerDraft=blankDraft(); saveCustomCards(); renderDesign(); }
+// --- reskin: alternate art for a real card you own (stays legal to play) ---
+function saveSkins(){ try{ localStorage.setItem('pdb_skins', JSON.stringify(state.cardSkins)); }catch(e){ toast('Storage full — remove an alt art or use smaller images'); } }
+function skinThumb(id){ const s=state.cardSkins[id]; return (s&&s.art)||((card(id)||{}).thumb)||''; }
+function skinName(id){ const s=state.cardSkins[id]; return (s&&s.name)||((card(id)||{}).name)||''; }
+function frameForCard(c){ const t=(c&&c.type_line||'').toLowerCase(); if(/\bland\b/.test(t)) return 'land'; const cols=(c&&c.colors)||[]; if(cols.length>=2) return 'gold'; if(cols.length===1) return {W:'white',U:'blue',B:'black',R:'red',G:'green'}[cols[0]]||'artifact'; if(/artifact/.test(t)) return 'artifact'; return 'artifact'; }
+function skinToCard(id, art, name){ const c=card(id)||{}; const pt=(c.power!=null&&c.toughness!=null)?(c.power+'/'+c.toughness):''; return { name: name||c.name||'', cost: c.mana_cost||'', type: c.type_line||'', text: c.text||'', flavor:'', pt, art: (art!=null?art:skinThumb(id)), frame: frameForCard(c) }; }
+function setDesignMode(m){ state.designMode=m; renderDesign(); }
+function reskinResultsHTML(){
+  const q=(state.reskinQuery||'').toLowerCase();
+  const owned=Object.keys(state.collection).filter(id=>state.collection[id]>0).map(id=>card(id)).filter(Boolean);
+  if(!owned.length) return `<div class="empty"><div class="t">No cards in your collection</div><div class="tiny">Add cards to your collection, then reskin them here.</div></div>`;
+  const matches=owned.filter(c=>!q||c.name.toLowerCase().includes(q)).slice(0,40);
+  if(!matches.length) return `<div class="tiny muted" style="padding:10px">No cards match.</div>`;
+  return matches.map(c=>`<div class="cardrow" onclick="pickReskin('${c.id}')" style="cursor:pointer"><div class="thumb" style="background-image:url('${skinThumb(c.id)}')"></div><div class="info"><div class="nm">${esc(skinName(c.id))}</div><div class="meta">${esc(shortType(c.type_line))}${state.cardSkins[c.id]?' · reskinned':''}</div></div></div>`).join('');
+}
+function renderReskin(head){
+  const dr=state.reskinDraft; let h=head;
+  if(dr&&dr.cardId){ const c=card(dr.cardId)||{};
+    h+=`<div id="cardPreview" style="display:flex;justify-content:center;margin-bottom:14px">${cardPreviewHTML(skinToCard(dr.cardId,dr.art,dr.name))}</div>`;
+    h+=`<div class="tiny muted" style="margin-bottom:10px">Alternate art for <b style="color:var(--text)">${esc(c.name||'')}</b> — the rules don’t change, so it’s legal to play. Your art shows in-game.</div>`;
+    h+=`<label class="btn ghost full" style="margin-bottom:10px;cursor:pointer">${dr.art?'Change art':'Upload custom art'}<input type="file" accept="image/*" style="display:none" onchange="reskinArt(this)"></label>`;
+    h+=`<div class="field"><label>Display name (optional)</label><input class="scan-input" value="${esc(dr.name||'')}" oninput="reskinField(this.value)" placeholder="${esc(c.name||'')}" autocomplete="off"></div>`;
+    h+=`<div class="row" style="gap:8px;margin:6px 0 18px"><button class="btn gold full" onclick="saveReskin()">Save alt art</button><button class="btn full" onclick="cancelReskin()">Back</button></div>`;
+  } else {
+    h+=`<div class="search-wrap"><input id="reskinSearch" placeholder="Search your collection…" value="${esc(state.reskinQuery||'')}" oninput="reskinSearch(this.value)" autocomplete="off"></div><div id="reskinResults">${reskinResultsHTML()}</div>`;
+    const skinIds=Object.keys(state.cardSkins||{});
+    if(skinIds.length) h+=`<div class="section-title" style="margin-top:16px">Your alternate arts (${skinIds.length})</div><div class="design-gallery">${skinIds.map(id=>`<div class="dg-item"><div onclick="pickReskin('${id}')" style="cursor:pointer">${cardPreviewHTML(skinToCard(id),true)}</div><button class="btn sm danger" style="margin-top:6px" onclick="deleteReskin('${id}')">Remove</button></div>`).join('')}</div>`;
+  }
+  main.innerHTML=h;
+}
+function reskinSearch(v){ state.reskinQuery=v; const el=$('#reskinResults'); if(el) el.innerHTML=reskinResultsHTML(); }
+function pickReskin(id){ const s=state.cardSkins[id]||{}; state.reskinDraft={cardId:id, art:s.art||null, name:s.name||''}; renderDesign(); window.scrollTo(0,0); }
+function reskinField(v){ if(state.reskinDraft){ state.reskinDraft.name=v; const el=$('#cardPreview'); if(el) el.innerHTML=cardPreviewHTML(skinToCard(state.reskinDraft.cardId, state.reskinDraft.art, state.reskinDraft.name)); } }
+function reskinArt(input){ const f=input&&input.files&&input.files[0]; if(!f||!state.reskinDraft) return; const r=new FileReader();
+  r.onload=()=>{ const img=new Image(); img.onload=()=>{ const max=620; let w=img.width,h=img.height; if(w>max){ h=Math.round(h*max/w); w=max; } const cv=document.createElement('canvas'); cv.width=w; cv.height=h; cv.getContext('2d').drawImage(img,0,0,w,h); state.reskinDraft.art=cv.toDataURL('image/jpeg',0.82); const el=$('#cardPreview'); if(el) el.innerHTML=cardPreviewHTML(skinToCard(state.reskinDraft.cardId, state.reskinDraft.art, state.reskinDraft.name)); }; img.onerror=()=>toast('Couldn’t read that image'); img.src=String(r.result); };
+  r.readAsDataURL(f); }
+function saveReskin(){ const dr=state.reskinDraft; if(!dr) return; if(!dr.art && !(dr.name&&dr.name.trim())){ toast('Add custom art or a name first'); return; }
+  state.cardSkins[dr.cardId]={ art:dr.art||null, name:(dr.name&&dr.name.trim())||null }; saveSkins(); toast('Alternate art saved'); state.reskinDraft=null; renderDesign(); }
+function cancelReskin(){ state.reskinDraft=null; renderDesign(); }
+function deleteReskin(id){ if(!confirm('Remove this alternate art?')) return; delete state.cardSkins[id]; if(state.reskinDraft&&state.reskinDraft.cardId===id) state.reskinDraft=null; saveSkins(); renderDesign(); }
 function renderMetaDeck(){
   const d=state.metaDeck;
   let head=`<div class="detail-head"><button class="back" onclick="closeMetaDeck()">‹</button><div class="ttl">${esc(d.name)}</div></div>`;
@@ -2200,9 +2248,9 @@ function matchDiceHTML(){
   else { h+=`<div class="panel" style="text-align:center"><div style="font-weight:700;font-size:16px;color:${iGoFirst?'var(--ok)':'var(--text)'}">${iGoFirst?'You go first!':'Opponent goes first'}</div></div>`+ (M.amHost?`<button class="btn gold full" onclick="matchBegin()">Begin game ▶</button>`:`<div class="panel"><div class="tiny muted">Waiting for the host to start the game…</div></div>`); }
   return h;
 }
-function mBoardCard(c,mine){ const cd=card(c.cardId),th=cd?(cd.thumb||''):''; const tok=c.token; const cls='mbcard '+(c.tapped?'tapped ':'')+(c.atk?'atk ':'')+(tok?'mtoken':''); const st=tok?'':`style="background-image:url('${th}')"`;
+function mBoardCard(c,mine){ const cd=card(c.cardId); const tok=c.token; const th=tok?'':(mine?skinThumb(c.cardId):(cd?cd.thumb||'':'')); const nm=cd?(mine?skinName(c.cardId):cd.name):(tok?tok+' token':''); const cls='mbcard '+(c.tapped?'tapped ':'')+(c.atk?'atk ':'')+(tok?'mtoken':''); const st=tok?'':`style="background-image:url('${th}')"`;
   const badge = c.atk?'<span class="mbadge"></span>':(c.sick?'<span class="mbadge"></span>':(c.isCmd?'<span class="mbadge"></span>':''));
-  return `<button class="${cls}" ${st} title="${cd?esc(cd.name):(tok?esc(tok)+' token':'')}" ${mine?`onclick="matchBoardMenu('${c.iid}')"`:'disabled'}>${tok?esc(tok):''}${badge}</button>`; }
+  return `<button class="${cls}" ${st} title="${esc(nm)}" ${mine?`onclick="matchBoardMenu('${c.iid}')"`:'disabled'}>${tok?esc(tok):''}${badge}</button>`; }
 function poolHTML(p){ const parts=MANA_COLORS.filter(c=>p[c]>0).map(c=>`<span class="manachip m-${c}">${c}${p[c]>1?' '+p[c]:''}</span>`); return parts.length?parts.join(''):'<span class="tiny muted">empty</span>'; }
 function matchPlayHTML(){
   const M=state.match, me=M.me, o=M.opp; const myTurn=(M.amHost===M.turnHost); const phaseName=MATCH_PHASES[me.phase||0];
@@ -2235,7 +2283,7 @@ function matchPlayHTML(){
   } else phaseBar=`<div class="turnbar"><span>Opponent’s turn</span></div>`;
 
   let cmdZoneHTML='';
-  if(me.cmd && me.cmdZone){ const cc=card(me.cmd); const costTxt=(manaText(cc&&cc.mana_cost)||'')+(me.cmdTax?' +{'+me.cmdTax+'}':''); cmdZoneHTML=`<div class="cmdzone"><div class="thumb" style="background-image:url('${cc?cc.thumb:''}')"></div><div style="flex:1;min-width:0"><div class="tiny" style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${cc?esc(cc.name):'Commander'}</div><div class="tiny muted">Command zone · ${costTxt}</div></div><button class="btn gold sm" ${myTurn?'':'disabled'} onclick="matchCastCommander()">Cast</button></div>`; }
+  if(me.cmd && me.cmdZone){ const cc=card(me.cmd); const costTxt=(manaText(cc&&cc.mana_cost)||'')+(me.cmdTax?' +{'+me.cmdTax+'}':''); cmdZoneHTML=`<div class="cmdzone"><div class="thumb" style="background-image:url('${skinThumb(me.cmd)}')"></div><div style="flex:1;min-width:0"><div class="tiny" style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${cc?esc(skinName(me.cmd)):'Commander'}</div><div class="tiny muted">Command zone · ${costTxt}</div></div><button class="btn gold sm" ${myTurn?'':'disabled'} onclick="matchCastCommander()">Cast</button></div>`; }
 
   const myDmg=me.cmdDmg?` · <span style="color:${me.cmdDmg>=21?'var(--danger)':'var(--muted)'}">${me.cmdDmg}/21</span>`:'';
   const meHtml=`<div class="mpanel ${myTurn?'active':''}">
@@ -2246,7 +2294,7 @@ function matchPlayHTML(){
       <div class="manabar"><span class="tiny muted">Mana:</span> ${poolHTML(me.pool)} <button class="btn sm" onclick="matchEmptyPool()">Empty</button></div>
       <div class="mboard">${me.board.map(c=>mBoardCard(c,true)).join('')||'<div class="tiny muted" style="padding:10px">Tap lands for mana, then play cards →</div>'}</div>
       <div class="section-title" style="margin:12px 2px 6px">Your hand (${me.hand.length})${handChoice?' — tap a glowing card':''}</div>
-      <div class="mhand">${me.hand.map((cid,i)=>{ const cd=card(cid),th=cd?(cd.thumb||''):''; return `<button class="mhcard${handChoice?' glow':''}" style="background-image:url('${th}')" title="${cd?esc(cd.name):''}" onclick="${handChoice?`matchPickChoice(${i})`:`matchPlay(${i})`}"></button>`; }).join('')||'<div class="tiny muted" style="padding:10px">Your hand is empty</div>'}</div>
+      <div class="mhand">${me.hand.map((cid,i)=>{ const th=skinThumb(cid); return `<button class="mhcard${handChoice?' glow':''}" style="background-image:url('${th}')" title="${esc(skinName(cid))}" onclick="${handChoice?`matchPickChoice(${i})`:`matchPlay(${i})`}"></button>`; }).join('')||'<div class="tiny muted" style="padding:10px">Your hand is empty</div>'}</div>
     </div>`;
 
   return stackBar + blockBar + choiceBar + oppHtml + phaseBar + meHtml;
@@ -3149,7 +3197,8 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,loadCombos,loadMeta,openMetaDeck,closeMetaDeck,randomCommander,
   openShoppingList,
   exportDeck,copyDeckText,shareDeckText,
-  designArt,designField,setDesignFrame,saveDesignCard,newDesignCard,editDesignCard,deleteDesignCard,installApp,
+  designArt,designField,setDesignFrame,saveDesignCard,newDesignCard,editDesignCard,deleteDesignCard,
+  setDesignMode,reskinSearch,pickReskin,reskinField,reskinArt,saveReskin,cancelReskin,deleteReskin,installApp,
   startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
