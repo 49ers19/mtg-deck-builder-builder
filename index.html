@@ -2404,22 +2404,45 @@ async function loadPrecon(i){
 function openPasteCollection(){
   modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
     <div class="modal">
-      <h3>Paste cards to your collection</h3>
-      <div class="field"><label>One card per line — quantities optional (e.g. “4 Llanowar Elves”)</label>
-        <textarea id="pasteCollText" class="imp-text" placeholder="4 Llanowar Elves&#10;1 Sol Ring&#10;2 Counterspell&#10;..." autocomplete="off"></textarea></div>
+      <h3>Add cards to your collection</h3>
+      <label class="btn ghost full" style="margin-bottom:10px;cursor:pointer">Import an MTGO .csv file<input type="file" accept=".csv,.txt" style="display:none" onchange="mtgoFilePicked(this)"></label>
+      <div class="field"><label>…or paste a list / your MTGO collection export</label>
+        <textarea id="pasteCollText" class="imp-text" placeholder="4 Llanowar Elves&#10;1 Sol Ring&#10;&#10;— or MTGO CSV —&#10;&quot;Card Name&quot;,&quot;Quantity&quot;,…" autocomplete="off"></textarea></div>
+      <div class="tiny muted" style="margin:-4px 0 10px">In MTGO: Collection → right-click → Export → CSV. Foil and non-foil copies are combined.</div>
       <div id="pasteCollStatus" class="tiny muted" style="margin-bottom:10px"></div>
       <button class="btn gold full" onclick="runPasteCollection()">Add to collection</button>
       <button class="btn ghost full" style="margin-top:7px" onclick="closeModal()">Cancel</button>
     </div></div>`;
   setTimeout(()=>{ const t=$('#pasteCollText'); if(t) t.focus(); },60);
 }
+function mtgoFilePicked(input){ const f=input&&input.files&&input.files[0]; if(!f) return; const r=new FileReader();
+  r.onload=()=>{ const t=$('#pasteCollText'); if(t) t.value=String(r.result||''); const s=$('#pasteCollStatus'); if(s) s.textContent='Loaded '+f.name+' — tap “Add to collection”.'; };
+  r.onerror=()=>{ const s=$('#pasteCollStatus'); if(s) s.textContent='Couldn’t read that file.'; };
+  r.readAsText(f); }
+// CSV helpers (MTGO collection export)
+function parseCsvRow(line){ const out=[]; let cur='',inq=false; for(let i=0;i<line.length;i++){ const ch=line[i];
+  if(inq){ if(ch==='"'){ if(line[i+1]==='"'){ cur+='"'; i++; } else inq=false; } else cur+=ch; }
+  else { if(ch==='"') inq=true; else if(ch===','){ out.push(cur); cur=''; } else cur+=ch; } }
+  out.push(cur); return out; }
+function looksLikeMtgoCsv(text){ const first=(text.split(/\r?\n/)[0]||'').toLowerCase(); return /card ?name/.test(first) && /(quantity|qty|count)/.test(first); }
+function parseMtgoCsv(text){
+  const rows=text.split(/\r?\n/).filter(l=>l.trim().length); if(!rows.length) return [];
+  const header=parseCsvRow(rows[0]).map(h=>h.trim().toLowerCase());
+  let nameIdx=header.findIndex(h=>/card ?name|^name$/.test(h));
+  let qtyIdx=header.findIndex(h=>/quantity|qty|count/.test(h));
+  let start=1; if(nameIdx<0){ nameIdx=0; if(qtyIdx<0) qtyIdx=1; start=0; } if(qtyIdx<0) qtyIdx=1;
+  const acc={}, order=[];
+  for(let i=start;i<rows.length;i++){ const cols=parseCsvRow(rows[i]); let name=(cols[nameIdx]||'').trim(); let qty=parseInt((cols[qtyIdx]||'').trim(),10);
+    if(!name) continue; if(isNaN(qty)||qty<0) qty=1; if(name.includes('//')) name=name.split('//')[0].trim();
+    if(!(name in acc)){ acc[name]=0; order.push(name); } acc[name]+=qty; }
+  return order.map(n=>({name:n, qty:acc[n]})); }
 async function runPasteCollection(){
   const text=($('#pasteCollText')&&$('#pasteCollText').value)||'';
   const statusEl=$('#pasteCollStatus');
-  const parsed=parseDeckList(text);
-  const lines=parsed.cards.slice();
-  if(parsed.commanderName) lines.push({qty:1,name:parsed.commanderName});
-  if(!lines.length){ if(statusEl) statusEl.textContent='Nothing to add — paste some cards first.'; return; }
+  let lines;
+  if(looksLikeMtgoCsv(text)){ lines=parseMtgoCsv(text); }
+  else { const parsed=parseDeckList(text); lines=parsed.cards.slice(); if(parsed.commanderName) lines.push({qty:1,name:parsed.commanderName}); }
+  if(!lines.length){ if(statusEl) statusEl.textContent='Nothing to add — paste a list or import an MTGO CSV first.'; return; }
   const unique=[...new Set(lines.map(l=>l.name))];
   if(statusEl) statusEl.innerHTML='<span class="mini-spin"></span> Looking up '+unique.length+' cards…';
   const {found}=await scryCollection(unique);
@@ -2868,7 +2891,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,scanAdd,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
-  openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,openBgPicker,setBg,
+  openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,mtgoFilePicked,openBgPicker,setBg,
   setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,installApp,
   startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
