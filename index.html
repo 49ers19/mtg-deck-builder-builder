@@ -533,6 +533,7 @@ function renderDecks(){
         <button class="btn gold sm" onclick="openDeckModal()">＋ New</button>
       </div>
     </div>`;
+  if(state.decks.length) h += `<button class="btn full" style="margin-bottom:12px" onclick="openShoppingList()">Deck shopping list — cards you still need</button>`;
   if(!state.decks.length){
     h += `<div class="empty"><div class="big"></div><div class="t">No decks yet</div>
       <div class="tiny">Build one card by card, or paste an existing list.</div>
@@ -964,6 +965,36 @@ function renderCollection(){
 // ---------- ANALYZE ----------
 function selectAnalyzeDeck(id){ state.analyzeDeckId=id; render(); const d=state.decks.find(x=>x.id===id); if(d){ enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[])); if(!state.analyzeRecs[id]) fetchRecs(d); } }
 function closeAnalyze(){ state.analyzeDeckId=null; render(); }
+async function loadCombos(deckId){
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  state.analyzeCombos=state.analyzeCombos||{}; state.analyzeCombos[deckId]={status:'loading'}; if(state.analyzeDeckId===deckId) renderAnalyze();
+  try{
+    if(!state.comboDB){ const r=await fetch('combos.json'); state.comboDB=await r.json(); }
+    const owned=new Set(); Object.keys(d.cards).forEach(id=>{ const c=card(id); if(c) owned.add(c.name.toLowerCase()); }); if(d.commander&&card(d.commander)) owned.add(card(d.commander).name.toLowerCase());
+    const inDeck=[], almost=[];
+    state.comboDB.forEach(cb=>{ const cards=cb.c||[]; if(cards.length<2) return; const missing=cards.filter(n=>!owned.has(n.toLowerCase()));
+      if(missing.length===0) inDeck.push({cards, produces:cb.p||[]});
+      else if(missing.length===1) almost.push({cards, produces:cb.p||[], missing}); });
+    state.analyzeCombos[deckId]={status:'ok', inDeck, almost};
+  }catch(e){ state.analyzeCombos[deckId]={status:'error'}; }
+  if(state.analyzeDeckId===deckId) renderAnalyze();
+}
+function combosPanelHTML(d){
+  const cb=state.analyzeCombos&&state.analyzeCombos[d.id];
+  let h=`<div class="panel"><div class="section-title" style="margin-top:0">Combos</div>`;
+  if(!cb){ h+=`<button class="btn full" onclick="loadCombos('${d.id}')">Find combos in this deck</button><div class="tiny muted" style="margin-top:6px;opacity:.65">Via Commander Spellbook.</div>`; }
+  else if(cb.status==='loading'){ h+=`<div class="tiny muted"><span class="mini-spin"></span> Checking Commander Spellbook…</div>`; }
+  else if(cb.status==='error'){ h+=`<div class="tiny muted">Couldn’t reach Commander Spellbook.</div><button class="btn sm" style="margin-top:8px" onclick="loadCombos('${d.id}')">Retry</button>`; }
+  else {
+    if(cb.inDeck.length){ h+=`<div class="tiny muted" style="margin-bottom:7px">${cb.inDeck.length} combo${cb.inDeck.length>1?'s':''} already in your deck</div>`;
+      cb.inDeck.slice(0,25).forEach(x=>{ h+=`<div style="background:var(--bg2);border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:7px"><div style="font-weight:600;font-size:13px">${esc(x.cards.join(' + '))}</div><div class="tiny" style="color:var(--ok);margin-top:2px">→ ${esc(x.produces.join(', ')||'combo')}</div></div>`; });
+    } else h+=`<div class="tiny muted">No complete combos detected.</div>`;
+    if(cb.almost.length){ h+=`<div class="tiny muted" style="margin:12px 2px 7px;font-weight:600;color:var(--accent2)">Almost there — add 1–2 cards</div>`;
+      cb.almost.slice(0,25).forEach(x=>{ h+=`<div style="background:var(--bg2);border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:7px"><div style="font-weight:600;font-size:13px">${esc(x.cards.join(' + '))}</div><div class="tiny" style="margin-top:2px">→ ${esc(x.produces.join(', ')||'combo')}</div><div class="tiny" style="color:var(--accent2);margin-top:3px">Missing: ${esc(x.missing.join(', '))}</div></div>`; });
+    }
+  }
+  return h+`</div>`;
+}
 function setAnalyzeOwned(v){ state.analyzeOwnedOnly=!!v; renderAnalyze(); }
 function slugify(name){ return name.toLowerCase().normalize('NFD').replace(/[^a-z0-9 ]/g,'').trim().replace(/\s+/g,'-'); }
 function deckToText(d){ let s=''; if(d.commander&&card(d.commander)) s+='Commander\n1 '+card(d.commander).name+'\n\n'; s+='Deck\n'; for(const id in d.cards){ const c=card(id); if(c) s+=d.cards[id]+' '+c.name+'\n'; } return s.trim(); }
@@ -976,6 +1007,23 @@ function exportDeck(id){ const d=state.decks.find(x=>x.id===id); if(!d) return; 
 }
 function copyDeckText(){ const t=$('#exportText'); if(!t) return; const v=t.value; if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(v).then(()=>toast('Decklist copied')).catch(()=>{ t.select(); document.execCommand('copy'); toast('Decklist copied'); }); } else { t.select(); document.execCommand('copy'); toast('Decklist copied'); } }
 function shareDeckText(id){ const d=state.decks.find(x=>x.id===id); if(!d) return; const txt=deckToText(d); if(navigator.share){ navigator.share({title:d.name, text:txt}).catch(()=>{}); } else { copyDeckText(); } }
+function openShoppingList(){
+  const ownedNames=new Set(Object.keys(state.collection).filter(id=>state.collection[id]>0).map(id=>((card(id)||{}).name||'').toLowerCase()).filter(Boolean));
+  const need={};
+  state.decks.forEach(d=>{ Object.keys(d.cards).concat(d.commander?[d.commander]:[]).forEach(id=>{ const c=card(id); if(!c) return; const nm=c.name.toLowerCase(); if(ownedNames.has(nm)) return; if(!need[nm]) need[nm]={name:c.name, price:c.price, decks:0}; need[nm].decks++; }); });
+  const items=Object.values(need).sort((a,b)=>b.decks-a.decks || (parseFloat(b.price||0)-parseFloat(a.price||0)));
+  const total=items.reduce((s,x)=>s+(parseFloat(x.price)||0),0);
+  const store=state.buyStore==='ck'?'ck':'tcg';
+  let body;
+  if(!state.decks.length){ body=`<div class="tiny muted" style="padding:10px 0">Build or import a deck first.</div>`; }
+  else if(!items.length){ body=`<div class="tiny muted" style="padding:10px 0">You own every card your decks use.</div>`; }
+  else {
+    body=`<div class="tiny muted" style="margin-bottom:8px">${items.length} cards across your decks you don’t own · ~$${total.toFixed(0)}</div>`;
+    body+= store==='ck' ? `<a class="btn gold full" style="margin-bottom:10px" href="https://www.cardkingdom.com/builder" target="_blank" rel="noopener">Buy all on Card Kingdom</a>` : `<a class="btn gold full" style="margin-bottom:10px" href="${tcgMassLink(items.map(x=>x.name))}" target="_blank" rel="noopener">Buy all on TCGplayer</a>`;
+    body+= items.map(x=>`<div class="cardrow"><div class="info"><div class="nm">${esc(x.name)}</div><div class="meta">${x.decks} deck${x.decks>1?'s':''}${x.price?' · $'+x.price:''}</div></div><a class="btn gold sm" href="${store==='ck'?ckLink(x):tcgLink(x)}" target="_blank" rel="noopener">Buy</a></div>`).join('');
+  }
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-height:88vh;overflow-y:auto"><h3>Deck shopping list</h3>${body}<button class="btn ghost full" style="margin-top:10px" onclick="closeModal()">Close</button></div></div>`;
+}
 async function scryfallFallbackRecs(cmd, have){
   const ci=(cmd.ci&&cmd.ci.length?cmd.ci:cmd.colors)||[];
   const q='legal:commander '+(ci.length?'id<='+ci.join(''):'id:c')+' -t:land -is:commander';
@@ -1205,6 +1253,8 @@ function renderAnalyze(){
 
   const bad=legalityIssues(d);
   if(bad.length) h+=`<div class="panel"><div class="section-title" style="margin-top:0;color:var(--danger)">Legality</div>${bad.map(b=>`<div class="tiny" style="color:var(--danger);margin-bottom:3px">• ${esc(b)}</div>`).join('')}</div>`;
+
+  h+=combosPanelHTML(d);
 
   // what to add
   const rec=state.analyzeRecs[d.id];
@@ -3096,7 +3146,8 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,
   openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,mtgoFilePicked,openBgPicker,setBg,
-  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,loadMeta,openMetaDeck,closeMetaDeck,randomCommander,
+  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,loadCombos,loadMeta,openMetaDeck,closeMetaDeck,randomCommander,
+  openShoppingList,
   exportDeck,copyDeckText,shareDeckText,
   designArt,designField,setDesignFrame,saveDesignCard,newDesignCard,editDesignCard,deleteDesignCard,installApp,
   startGenerate,cancelGenerate,generateFromResult,runGen,
