@@ -1650,9 +1650,103 @@ function renderPlay(){
   main.innerHTML = `<div class="play-ctrl" style="margin-bottom:14px"><div class="pc-group">
       <button class="pc-btn ${mode==='life'?'on':''}" onclick="setPlayMode('life')">Life</button>
       <button class="pc-btn ${mode==='play'?'on':''}" onclick="setPlayMode('play')">▶ Playtest</button>
-    </div></div>` + (mode==='play' ? deckPickerHTML() : lifeCounterHTML());
+      <button class="pc-btn ${mode==='learn'?'on':''}" onclick="setPlayMode('learn')">Learn</button>
+    </div></div>` + (mode==='play' ? deckPickerHTML() : mode==='learn' ? tutorialHTML() : lifeCounterHTML());
 }
 function setPlayMode(m){ state.play.mode=m; render(); }
+// ---------- LEARN TO PLAY (staged tutorial) ----------
+const TUT_B=s=>`<div class="tiny" style="margin:5px 0;line-height:1.6">${s}</div>`;
+const TUT_BUL=s=>`<div class="tiny" style="margin:4px 0 4px 4px;line-height:1.55">• ${s}</div>`;
+const TUTORIAL=[
+  {title:'The Goal', body:
+    TUT_B('Magic is a duel. Each player has their own deck and a starting life total — <b>20</b> in a normal game, <b>40</b> in Commander.')+
+    TUT_B('You take turns playing <b>lands</b> and casting <b>spells</b> to build up a board of creatures and other permanents.')+
+    TUT_B('<b>You win by reducing every opponent to 0 life</b> (there are a few other ways — more on that later).')},
+  {title:'Card Types', body:
+    TUT_B('The cards you’ll see:')+
+    TUT_BUL('<b>Lands</b> — tap them to make mana. Usually one per turn.')+
+    TUT_BUL('<b>Creatures</b> — attack and block. Have power/toughness (e.g. 2/2).')+
+    TUT_BUL('<b>Instants</b> — cast any time, even on an opponent’s turn.')+
+    TUT_BUL('<b>Sorceries</b> — one-shot spells, only on your own main phase.')+
+    TUT_BUL('<b>Artifacts &amp; Enchantments</b> — permanents that stay and give ongoing effects.')+
+    TUT_BUL('<b>Planeswalkers</b> — allies with loyalty abilities.')},
+  {title:'The Turn', body:
+    TUT_B('Every turn runs through the same phases, in order:')+
+    TUT_BUL('<b>1. Untap</b> — untap your tapped cards.')+
+    TUT_BUL('<b>2. Upkeep</b> — “start of turn” triggers happen.')+
+    TUT_BUL('<b>3. Draw</b> — draw a card.')+
+    TUT_BUL('<b>4. First Main</b> — play a land, cast anything.')+
+    TUT_BUL('<b>5. Combat</b> — attack with creatures.')+
+    TUT_BUL('<b>6. Second Main</b> — play a land / cast more.')+
+    TUT_BUL('<b>7. End</b> — end-of-turn triggers, then pass.')+
+    TUT_B('<span class="muted">In this app, the ▶ Playtest and networked match walk you through these phases automatically.</span>')},
+  {title:'Mana', icon:'', body:
+    TUT_B('Spells cost <b>mana</b>. You make mana by <b>tapping lands</b> (turning them sideways).')+
+    TUT_B(`There are five colors plus colorless: ${pips(['W','U','B','R','G'])}`)+
+    TUT_B('A cost like <b>{2}{R}</b> means “2 generic + 1 red”. You’d tap 3 lands — at least one making red — to pay it.')+
+    TUT_BUL('Generic (the number) can be paid with <b>any</b> mana.')+
+    TUT_BUL('Colored pips must be paid with that exact color.')+
+    TUT_B('<span class="muted">Playtest mode adds mana to a pool as you tap, and only lets you cast what you can actually afford.</span>')},
+  {title:'Casting Spells', body:
+    TUT_B('To cast a spell, pay its mana cost. Where you can cast it depends on its type:')+
+    TUT_BUL('<b>Sorcery-speed</b> (creatures, sorceries, artifacts, enchantments, planeswalkers): only on <b>your</b> turn, during a main phase, when nothing else is happening.')+
+    TUT_BUL('<b>Instant-speed</b> (instants, and abilities with “flash”): almost <b>any time</b>, including your opponent’s turn.')+
+    TUT_B('Creatures have <b>summoning sickness</b> the turn they arrive — they can’t attack or tap for abilities until you’ve controlled them since your last turn began.')},
+  {title:'The Stack', body:
+    TUT_B('When you cast a spell or activate an ability, it goes on <b>the stack</b> and waits — it doesn’t happen instantly.')+
+    TUT_B('Both players get a chance to respond with instants. The stack resolves <b>last-in, first-out</b>: the most recent thing happens first.')+
+    TUT_B('Example: you cast a creature. In response, an opponent casts a “destroy target creature” instant. Their spell resolves first and destroys it before your creature ever lands.')+
+    TUT_B('<span class="muted">The networked match opens a response window so each player can react before things resolve.</span>')},
+  {title:'Attacking', body:
+    TUT_B('During your <b>combat</b> phase you choose which untapped creatures attack. Attacking usually <b>taps</b> them.')+
+    TUT_BUL('A creature deals damage equal to its <b>power</b> (the left number).')+
+    TUT_BUL('It can’t attack if it’s <b>tapped</b> or has <b>summoning sickness</b>.')+
+    TUT_B(`<div class="row" style="gap:12px;align-items:center;margin:8px 0"><div style="border:1px solid var(--line);border-radius:8px;padding:8px 12px;text-align:center"><div style="font-weight:700">Goblin</div><div class="tiny muted">2 / 2</div></div><span style="font-size:20px">⚔️ →</span><div class="tiny muted">deals <b>2</b> to whatever blocks it,<br>or to the player if unblocked.</div></div>`)},
+  {title:'Blocking', body:
+    TUT_B('The <b>defending</b> player chooses blockers. Each blocking creature stops one attacker.')+
+    TUT_B('Then combat damage is dealt <b>simultaneously</b>: the attacker and blocker each deal their power to the other.')+
+    TUT_BUL('A creature that takes damage <b>equal to or above its toughness</b> is destroyed.')+
+    TUT_BUL('An <b>unblocked</b> attacker deals its damage to the defending player.')+
+    TUT_B(`<div class="row" style="gap:10px;align-items:center;margin:8px 0"><div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;text-align:center"><div style="font-weight:700">3/3</div><div class="tiny muted">attacker</div></div><span>vs</span><div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;text-align:center"><div style="font-weight:700">2/2</div><div class="tiny muted">blocker</div></div><div class="tiny muted">→ blocker dies (took 3),<br>attacker lives (took 2).</div></div>`)},
+  {title:'Keywords', body:
+    TUT_B('Common abilities you’ll meet:')+
+    TUT_BUL('<b>Flying</b> — can only be blocked by flying or reach.')+
+    TUT_BUL('<b>Trample</b> — extra damage past a blocker spills onto the player.')+
+    TUT_BUL('<b>Deathtouch</b> — any amount of its damage destroys a creature.')+
+    TUT_BUL('<b>Lifelink</b> — you gain life equal to damage it deals.')+
+    TUT_BUL('<b>Vigilance</b> — attacks without tapping.')+
+    TUT_BUL('<b>First strike</b> — deals its damage before normal creatures.')+
+    TUT_BUL('<b>Haste</b> — can attack the turn it arrives.')+
+    TUT_BUL('<b>Menace</b> — must be blocked by two or more creatures.')+
+    TUT_BUL('<b>Hexproof / Ward</b> — hard for opponents to target.')},
+  {title:'Winning', body:
+    TUT_B('The main ways a game ends:')+
+    TUT_BUL('An opponent hits <b>0 life</b>.')+
+    TUT_BUL('An opponent must <b>draw from an empty library</b>.')+
+    TUT_BUL('An opponent gets <b>10 poison</b> counters.')+
+    TUT_BUL('A card literally says “<b>you win the game</b>”.')+
+    TUT_B('Last player standing wins.')},
+  {title:'Commander', body:
+    TUT_B('Commander (EDH) is the format this app is built around:')+
+    TUT_BUL('<b>100 cards, singleton</b> — one of each card except basic lands.')+
+    TUT_BUL('A legendary creature is your <b>commander</b>, starting in the <b>command zone</b>.')+
+    TUT_BUL('You start at <b>40 life</b>.')+
+    TUT_BUL('<b>Commander tax</b>: each time you recast it from the command zone it costs <b>{2} more</b>.')+
+    TUT_BUL('<b>Color identity</b>: every card must fit your commander’s colors.')+
+    TUT_BUL('<b>21 combat damage</b> from a single commander eliminates that player.')+
+    TUT_B('<span class="muted">Ready to try it live? Head to ▶ Playtest, or use Matchmaking / Play with friends for a real game.</span>')},
+];
+function tutorialHTML(){
+  const i=Math.max(0,Math.min(TUTORIAL.length-1, state.tutStage||0)), s=TUTORIAL[i];
+  let h=`<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:9px;-webkit-overflow-scrolling:touch">${TUTORIAL.map((t,idx)=>`<button class="athemetag" style="white-space:nowrap;cursor:pointer;${idx===i?'background:var(--accent2);color:#0d0f1a;font-weight:700;border-color:var(--accent2)':''}" onclick="tutGo(${idx})">${idx+1}. ${esc(t.title)}</button>`).join('')}</div>`;
+  h+=`<div class="panel"><div class="section-title" style="margin-top:0">${esc(s.title)} <span class="tiny muted" style="float:right;font-weight:400">Step ${i+1} / ${TUTORIAL.length}</span></div>${s.body}</div>`;
+  h+=`<div class="row between" style="gap:8px">`;
+  h+= i>0 ? `<button class="btn sm" onclick="tutGo(${i-1})">‹ Back</button>` : `<span></span>`;
+  h+= i<TUTORIAL.length-1 ? `<button class="btn gold sm" onclick="tutGo(${i+1})">Next ›</button>` : `<button class="btn gold sm" onclick="setPlayMode('play')">Try a playtest ›</button>`;
+  h+=`</div>`;
+  return h;
+}
+function tutGo(i){ state.tutStage=i; render(); if(window.scrollTo) window.scrollTo(0,0); }
 function lifeCounterHTML(){
   const p=state.play;
   let h=`<div class="play-ctrl">
@@ -3519,7 +3613,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startGenerate,cancelGenerate,generateFromResult,runGen,
   openAccount,showLogin,googleSignIn,emailAuth,signOutUser,
   setPlayers,setStart,resetLife,life,poison,cmdDmg,
-  setPlayMode,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,cancelTarget,applyTargetOpponent,applyTargetTo,lethalDamage,
+  setPlayMode,tutGo,startGame,exitGame,gameNextTurn,gameMulligan,gameLife,oppDamage,oppSet,gameDrawBtn,gameShuffle,gameMove,gameTap,castCommander,gameCardMenu,gameLandLimit,playExtraLand,gameNextPhase,addMana,clearPool,tapForMana,tapAddMana,tapCard,tapDo,addCounter,castFromHand,gameUntapInfo,createToken,useAbility,cancelTarget,applyTargetOpponent,applyTargetTo,lethalDamage,
   openShare,joinRoom,leaveSession,copyShare,startMatchmaking,cancelMatchmaking,
   matchPickDeck,matchDraw,matchMulligan,matchPlay,matchLife,matchBoardMenu,matchTapBoard,matchUseAbility,matchRoll,matchBegin,matchEndTurn,exitMatch,
   matchResolveEffects,matchPickChoice,matchCancelChoice,matchZoneView,
