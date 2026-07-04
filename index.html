@@ -3032,19 +3032,30 @@ function addToDeck(cardId, deckId){
 function addMenu(cardId){
   const c = state._resultMap&&state._resultMap[cardId];
   const nm = c? c.name : 'card';
-  let deckBtns = state.decks.length
-    ? state.decks.map(d=>`<button class="btn full" onclick="addToDeck('${cardId}','${d.id}')">${esc(d.name)}</button>`).join('')
-    : `<div class="tiny muted" style="text-align:center;padding:6px">No decks yet — create one in the Decks tab.</div>`;
   modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
     <div class="modal">
       <h3>Add “${esc(nm)}”</h3>
       <div class="addmenu">
         <button class="btn gold full" onclick="addToCollection('${cardId}');closeModal()">To collection</button>
         <button class="btn full" onclick="addToWishlist('${cardId}');closeModal()">To wishlist</button>
-        <div class="section-title" style="margin:8px 2px 2px">Add to deck</div>
-        ${deckBtns}
+        <button class="btn full" onclick="addMenuDecks('${cardId}')">To a deck ›</button>
         <button class="btn ghost full" style="margin-top:6px" onclick="closeModal()">Cancel</button>
       </div>
+    </div></div>`;
+}
+// Step 2 of the add menu: a scrollable list of all decks.
+function addMenuDecks(cardId){
+  const c = state._resultMap&&state._resultMap[cardId];
+  const nm = c? c.name : 'card';
+  const list = state.decks.length
+    ? state.decks.map(d=>{ const cmd=d.commander&&card(d.commander); const sub=(cmd?esc(cmd.name):(esc(d.format||'Casual')))+' · '+deckCardCount(d)+' cards';
+        return `<button class="btn full" style="text-align:left;justify-content:flex-start;flex-direction:column;align-items:flex-start;gap:2px" onclick="addToDeck('${cardId}','${d.id}')"><span style="font-weight:600">${esc(d.name)}</span><span class="tiny muted">${sub}</span></button>`; }).join('')
+    : `<div class="tiny muted" style="text-align:center;padding:16px">No decks yet — create one in the Decks tab.</div>`;
+  modalRoot.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <h3>Add “${esc(nm)}” to…</h3>
+      <div style="max-height:54vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin:2px 0 4px;-webkit-overflow-scrolling:touch">${list}</div>
+      <button class="btn ghost full" style="margin-top:8px" onclick="addMenu('${cardId}')">‹ Back</button>
     </div></div>`;
 }
 
@@ -3410,7 +3421,7 @@ document.querySelectorAll('nav button').forEach(b=>{
 
 // expose for inline handlers
 Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQty,collQty,
-  addMenu,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,pickVariant,cardViewAdd,
+  addMenu,addMenuDecks,addToCollection,addToDeck,showCard,showCardObj,closeModal,setTab,pickVariant,cardViewAdd,
   setCollMode,addToWishlist,removeWishlist,setBuyStore,buyAllStore,
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,scanAdd,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
