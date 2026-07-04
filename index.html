@@ -737,7 +737,10 @@ function renderSearchList(){
           <div class="nm">${esc(c.name)} ${pips(c.colors&&c.colors.length?c.colors:(c.color_identity||[]))}</div>
           <div class="meta">${esc(shortType(c.type_line))} · ${(c.set||'').toUpperCase()}${off?` · <span style="color:var(--danger)">off-color</span>`:inDeck?` · <span style="color:var(--accent2)">${inDeck} in deck</span>`:owned?` · <span style="color:var(--ok)">${owned} owned</span>`:''}${bannedBadge(c)}</div>
         </div>
-        <button class="btn ${off?'':'gold'} sm" onclick="${picking?`setCommander('${picking.id}','${c.id}')`:generating?`generateFromResult('${c.id}')`:adding?`addToDeckDirect('${adding.id}','${c.id}')`:`addMenu('${c.id}')`}">${picking?'Set':generating?'Build':adding?(off?'✕':'＋'):'Add'}</button>
+        ${picking?`<button class="btn gold sm" onclick="setCommander('${picking.id}','${c.id}')">Set</button>`
+          :generating?`<button class="btn gold sm" onclick="generateFromResult('${c.id}')">Build</button>`
+          :adding?`<div class="row" style="gap:6px;flex-shrink:0"><button class="btn sm" title="Add to your collection only" onclick="addToCollection('${c.id}')">＋Own</button><button class="btn ${off?'':'gold'} sm" title="Add to this deck" onclick="addToDeckDirect('${adding.id}','${c.id}')">${off?'✕':'＋Deck'}</button></div>`
+          :`<button class="btn gold sm" onclick="addMenu('${c.id}')">Add</button>`}
       </div>`;
     });
   }
