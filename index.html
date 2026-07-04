@@ -1192,6 +1192,54 @@ function deckLibraryStats(d){ let N=0,lands=0,ramp=0; for(const id in d.cards){ 
 function karstenSources(pips,cmc){ cmc=Math.max(1,Math.min(7,Math.round(cmc||1))); pips=Math.max(1,Math.min(3,pips||1));
   const T={1:{1:19,2:15,3:13,4:12,5:11,6:10,7:9},2:{2:27,3:22,4:19,5:17,6:16,7:15},3:{3:26,4:22,5:20,6:18,7:17}};
   const row=T[pips]; let best=row[cmc]; if(best==null){ const keys=Object.keys(row).map(Number).sort((a,b)=>a-b); best=row[keys[0]]; for(const kk of keys){ if(kk<=cmc) best=row[kk]; } } return best; }
+// ---- deep breakdown helpers (all offline) ----
+function _nonlandCards(d){ const arr=[]; for(const id in d.cards){ if(id===d.commander) continue; const c=card(id); if(!c) continue; if(/\bLand\b/.test(c.type_line||'')) continue; arr.push({c,q:d.cards[id]}); } return arr; }
+function _txt(c){ return ((c.text!=null?c.text:c.oracle_text)||'').toLowerCase(); }
+function mvDetail(d){
+  const nl=_nonlandCards(d); const mvs=[]; let cMv=0,cN=0,sMv=0,sN=0;
+  nl.forEach(({c,q})=>{ const mv=Math.max(0,Math.round(c.cmc||0)); for(let i=0;i<q;i++) mvs.push(mv); const cr=/\bCreature\b/.test(c.type_line||''); if(cr){cMv+=(c.cmc||0)*q;cN+=q;} else {sMv+=(c.cmc||0)*q;sN+=q;} });
+  mvs.sort((a,b)=>a-b); const n=mvs.length;
+  const median=n?(n%2?mvs[(n-1)/2]:(mvs[n/2-1]+mvs[n/2])/2):0;
+  const freq={}; mvs.forEach(m=>freq[m]=(freq[m]||0)+1); let mode=0,mc=-1; Object.keys(freq).forEach(k=>{ if(freq[k]>mc){mc=freq[k];mode=+k;} });
+  const early=mvs.filter(m=>m<=2).length, mid=mvs.filter(m=>m>=3&&m<=4).length, late=mvs.filter(m=>m>=5).length;
+  return {n, median, mode, early, mid, late, avgCreature:cN?cMv/cN:0, avgSpell:sN?sMv/sN:0, creatureCount:cN, spellCount:sN};
+}
+function recommendedLands(d, avgMV){
+  const isCmd=d.format==='Commander'; let ramp=0; _nonlandCards(d).forEach(({c,q})=>{ if(cardCategories(c).includes('ramp')) ramp+=q; });
+  const base=isCmd?36:24, adj=(avgMV-3.0)*(isCmd?2.6:2.0), rampAdj=Math.min(isCmd?4:2, ramp*(isCmd?0.28:0.2));
+  let rec=Math.round(base+adj-rampAdj); rec=Math.max(isCmd?33:21, Math.min(isCmd?41:26, rec));
+  return {rec, ramp};
+}
+function curveByType(d){ const b=Array.from({length:8},()=>({cr:0,nc:0}));
+  _nonlandCards(d).forEach(({c,q})=>{ const i=Math.min(7,Math.max(0,Math.round(c.cmc||0))); if(/\bCreature\b/.test(c.type_line||'')) b[i].cr+=q; else b[i].nc+=q; }); return b; }
+function roleBalance(d){ const isCmd=d.format==='Commander'; const cat={ramp:0,draw:0,removal:0,wipe:0,counter:0,tutor:0,recursion:0};
+  for(const id in d.cards){ if(id===d.commander) continue; const c=card(id); if(!c) continue; cardCategories(c).forEach(k=>{ if(cat[k]!=null) cat[k]+=d.cards[id]; }); }
+  const T=isCmd?{ramp:10,draw:10,removal:8,wipe:3,counter:3,tutor:2,recursion:2}:{ramp:4,draw:6,removal:6,wipe:2,counter:3,tutor:1,recursion:1};
+  const meta={ramp:'Ramp / acceleration',draw:'Card draw',removal:'Spot removal',wipe:'Board wipes',counter:'Counterspells',tutor:'Tutors',recursion:'Recursion'};
+  return {cat,T,meta,order:['ramp','draw','removal','wipe','counter','tutor','recursion']}; }
+function interactionSuite(d){ const r={spot:0,wipe:0,counter:0,artench:0,gyhate:0,bounce:0};
+  for(const id in d.cards){ if(id===d.commander) continue; const c=card(id); if(!c) continue; const q=d.cards[id]; const t=_txt(c), cats=cardCategories(c);
+    if(cats.includes('wipe')) r.wipe+=q; else if(cats.includes('removal')) r.spot+=q;
+    if(cats.includes('counter')) r.counter+=q;
+    if(/(destroy|exile) target (artifact|enchantment)|destroy target artifact or enchantment|destroy target nonland permanent/.test(t)) r.artench+=q;
+    if(/exile[^.]{0,40}graveyard|graveyards?[^.]{0,25}exile|whenever[^.]{0,40}graveyard[^.]{0,20}exile/.test(t)) r.gyhate+=q;
+    if(/return target [^.]{0,40}to (its|their) owner'?s hand/.test(t)) r.bounce+=q;
+  } return r; }
+const A_KEYWORDS=[['Flying',/\bflying\b/],['Trample',/\btrample\b/],['Deathtouch',/\bdeathtouch\b/],['Lifelink',/\blifelink\b/],['Menace',/\bmenace\b/],['Haste',/\bhaste\b/],['Vigilance',/\bvigilance\b/],['First strike',/first strike/],['Double strike',/double strike/],['Hexproof',/\bhexproof\b/],['Ward',/\bward\b/],['Indestructible',/\bindestructible\b/],['Reach',/\breach\b/],['Flash',/\bflash\b/]];
+function keywordFreq(d){ const out={}; A_KEYWORDS.forEach(([lab])=>out[lab]=0);
+  for(const id in d.cards){ if(id===d.commander) continue; const c=card(id); if(!c) continue; const q=d.cards[id], t=_txt(c); A_KEYWORDS.forEach(([lab,re])=>{ if(re.test(t)) out[lab]+=q; }); } return out; }
+function landBase(d){ let total=0,basic=0,nonbasic=0,utility=0,tapped=0; const src={W:0,U:0,B:0,R:0,G:0,C:0};
+  // Restrict WUBRG sources to the deck's colour identity so any-colour lands (Command Tower etc.) don't add phantom colours. Colorless (C) is always kept.
+  const cmd=d.commander&&card(d.commander); const allow=cmd?((cmd.ci&&cmd.ci.length?cmd.ci:cmd.colors)||[]):[];
+  for(const id in d.cards){ const c=card(id); if(!c||!/\bLand\b/.test(c.type_line||'')) continue; const q=d.cards[id]; total+=q;
+    const isBasic=/\bBasic\b/.test(c.type_line||''); if(isBasic) basic+=q; else nonbasic+=q; const t=_txt(c);
+    (c.produced||[]).forEach(col=>{ if(src[col]==null) return; if(col!=='C' && allow.length && !allow.includes(col)) return; src[col]+=q; });
+    if(/enters (the battlefield )?tapped/.test(t) && !/unless|you may pay|if you control (two|fewer|a)/.test(t)) tapped+=q;
+    if(!isBasic && /\{t\}[^.]*:/.test(t) && /:[^.]*(draw|deals? \d|destroy|create|scry|gain \d|search|return|sacrifice|counter|exile|\+1\/\+1)/.test(t)) utility+=q;
+  } return {total,basic,nonbasic,utility,tapped,src}; }
+function creatureDetail(d){ let count=0; const buckets={sm:0,md:0,lg:0}; const list=[];
+  for(const id in d.cards){ if(id===d.commander) continue; const c=card(id); if(!c||!/\bCreature\b/.test(c.type_line||'')) continue; const q=d.cards[id]; count+=q; const p=parseInt(c.power,10); if(!isNaN(p)){ if(p<=2)buckets.sm+=q; else if(p<=4)buckets.md+=q; else buckets.lg+=q; list.push({name:c.name,p}); } }
+  list.sort((a,b)=>b.p-a.p); return {count, buckets, top:list.slice(0,3)}; }
 function rarityBreakdown(d){ const r={mythic:0,rare:0,uncommon:0,common:0}; for(const id in d.cards){ const c=card(id); if(!c) continue; const k=(c.rarity||'').toLowerCase(); if(r[k]!=null) r[k]+=d.cards[id]; } return r; }
 function creatureProfile(d){ let count=0,pw=0,tf=0,ptn=0,big=null,bigP=-1; for(const id in d.cards){ const c=card(id); if(!c||!/\bCreature\b/.test(c.type_line||'')) continue; const q=d.cards[id]; count+=q; const p=parseInt(c.power,10),t=parseInt(c.toughness,10); if(!isNaN(p)){ pw+=p*q; ptn+=q; if(p>bigP){ bigP=p; big=c.name; } } if(!isNaN(t)) tf+=t*q; } return {count, avgP:ptn?(pw/ptn).toFixed(1):null, avgT:ptn?(tf/ptn).toFixed(1):null, big, bigP}; }
 const A_THEMES=[
@@ -1338,6 +1386,63 @@ function renderAnalyze(){
         if(r.tough && r.toughT>r.target+2) h+=`<div class="tiny muted" style="margin:0 0 8px 26px;opacity:.62">toughest cast: ${esc(r.tough.name)} (${('{'+r.k+'}').repeat(r.tough.pips)} at ${r.tough.cmc} MV wants ~${r.toughT})</div>`; });
       h+=`<div class="tiny muted" style="margin-top:2px;opacity:.7">Frank Karsten’s guideline for casting your most colour-intensive card on curve ~90% of the time in a 99-card deck.</div></div>`;
     }
+  }
+
+  // ================= EXTREME-DETAIL BREAKDOWN =================
+  const mv=mvDetail(d);
+  if(mv.n){
+    const nlN=mv.n, pctOf=x=>Math.round(x/nlN*100)+'%';
+    const rl=recommendedLands(d,+avg); const landDelta=lands-rl.rec;
+    const landVerdict=Math.abs(landDelta)<=1?['on target','var(--ok)']:landDelta<0?[Math.abs(landDelta)+' below','var(--danger)']:[landDelta+' above','var(--accent2)'];
+    h+=`<div class="panel"><div class="section-title" style="margin-top:0">Mana Value Detail</div>
+      <div class="statgrid" style="margin-bottom:8px"><div class="stat"><div class="v">${avg}</div><div class="l">Avg MV</div></div><div class="stat"><div class="v">${mv.median}</div><div class="l">Median</div></div><div class="stat"><div class="v">${mv.mode}</div><div class="l">Most common</div></div><div class="stat"><div class="v">${rl.rec}</div><div class="l">Rec. lands</div></div></div>
+      <div class="row" style="gap:0;border-radius:8px;overflow:hidden;margin-bottom:6px;height:22px">
+        <div style="width:${mv.early/nlN*100}%;background:var(--ok);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#0d0f1a" title="0–2 MV">${mv.early?pctOf(mv.early):''}</div>
+        <div style="width:${mv.mid/nlN*100}%;background:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#0d0f1a" title="3–4 MV">${mv.mid?pctOf(mv.mid):''}</div>
+        <div style="width:${mv.late/nlN*100}%;background:var(--danger);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff" title="5+ MV">${mv.late?pctOf(mv.late):''}</div></div>
+      <div class="row between tiny muted" style="margin-bottom:8px"><span style="color:var(--ok)">■ Early 0–2 (${mv.early})</span><span style="color:var(--accent2)">■ Mid 3–4 (${mv.mid})</span><span style="color:var(--danger)">■ Top 5+ (${mv.late})</span></div>
+      <div class="tiny muted">Avg creature MV <b style="color:var(--text)">${mv.avgCreature.toFixed(2)}</b> · avg noncreature MV <b style="color:var(--text)">${mv.avgSpell.toFixed(2)}</b></div>
+      <div class="tiny muted" style="margin-top:3px">Land count: <b style="color:var(--text)">${lands}</b> vs recommended <b style="color:var(--text)">${rl.rec}</b> — <b style="color:${landVerdict[1]}">${landVerdict[0]}</b> <span style="opacity:.6">(curve + ${rl.ramp} ramp)</span></div></div>`;
+
+    const cbt=curveByType(d); const maxT=Math.max(1,...cbt.map(b=>b.cr+b.nc));
+    h+=`<div class="panel"><div class="section-title" style="margin-top:0">Curve by Type</div><div class="curve">`;
+    cbt.forEach((b,i)=>{ const tot=b.cr+b.nc; const hh=tot/maxT*100;
+      h+=`<div class="bar"><span class="cnt">${tot||''}</span><div style="width:100%;height:${hh}%;min-height:${tot?4:0}px;display:flex;flex-direction:column;justify-content:flex-end;border-radius:5px 5px 0 0;overflow:hidden">
+        <div style="height:${tot?b.nc/tot*100:0}%;background:var(--accent);opacity:.55"></div>
+        <div style="height:${tot?b.cr/tot*100:0}%;background:var(--accent2)"></div></div><span class="lbl">${i===7?'7+':i}</span></div>`; });
+    h+=`</div><div class="row between tiny muted" style="margin-top:6px"><span style="color:var(--accent2)">■ Creatures (${mv.creatureCount})</span><span style="color:var(--accent);opacity:.8">■ Noncreature (${mv.spellCount})</span></div></div>`;
+
+    const rb2=roleBalance(d);
+    h+=`<div class="panel"><div class="section-title" style="margin-top:0">Deck Role Balance</div>`;
+    rb2.order.forEach(k=>{ const v=rb2.cat[k], t=rb2.T[k]; if(!t && !v) return; const ratio=t?v/t:1; const col=ratio>=1?'var(--ok)':ratio>=0.6?'var(--accent2)':'var(--danger)';
+      h+=`<div class="row" style="gap:8px;align-items:center;margin-bottom:6px"><span class="tiny muted" style="width:96px">${rb2.meta[k]}</span><div class="pipbar" style="flex:1"><div class="pipbar-s" style="width:${Math.min(100,t?v/t*100:100).toFixed(0)}%;background:${col}"></div></div><span class="tiny muted" style="width:60px;text-align:right"><b style="color:var(--text)">${v}</b>${t?' / '+t:''}</span></div>`; });
+    h+=`<div class="tiny muted" style="margin-top:2px;opacity:.7">Bars show your count vs a typical target for this format. Aim to fill the low ones.</div></div>`;
+
+    const isu=interactionSuite(d); const totalInt=isu.spot+isu.wipe+isu.counter+isu.artench+isu.bounce; const intPct=Math.round(totalInt/nlN*100);
+    h+=`<div class="panel"><div class="section-title" style="margin-top:0">Interaction Suite <span class="tiny muted" style="float:right;font-weight:400">${intPct}% of nonlands</span></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px 14px">
+        <span class="tiny muted">Spot removal <b style="color:var(--text)">${isu.spot}</b></span>
+        <span class="tiny muted">Board wipes <b style="color:var(--text)">${isu.wipe}</b></span>
+        <span class="tiny muted">Counters <b style="color:var(--text)">${isu.counter}</b></span>
+        <span class="tiny muted">Artifact/ench. removal <b style="color:var(--text)">${isu.artench}</b></span>
+        <span class="tiny muted">Bounce <b style="color:var(--text)">${isu.bounce}</b></span>
+        <span class="tiny muted">Graveyard hate <b style="color:var(--text)">${isu.gyhate}</b></span></div>
+      <div class="tiny muted" style="margin-top:7px;opacity:.7">${totalInt>=10?'✓ A healthy interaction package.':totalInt>=6?'Reasonable interaction — a couple more answers wouldn’t hurt.':'Light on interaction — you may struggle to answer opposing threats.'}</div></div>`;
+
+    const kw=keywordFreq(d); const kwList=A_KEYWORDS.map(([lab])=>[lab,kw[lab]]).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
+    if(kwList.length) h+=`<div class="panel"><div class="section-title" style="margin-top:0">Keywords &amp; Evasion</div><div class="row" style="flex-wrap:wrap;gap:6px">${kwList.map(x=>`<span class="athemetag">${x[0]} · ${x[1]}</span>`).join('')}</div><div class="tiny muted" style="margin-top:7px;opacity:.7">How often each ability shows up across your cards.</div></div>`;
+
+    const lb=landBase(d);
+    if(lb.total){ const tapPct=Math.round(lb.tapped/lb.total*100);
+      h+=`<div class="panel"><div class="section-title" style="margin-top:0">Land Base</div>
+        <div class="row" style="flex-wrap:wrap;gap:8px 14px;margin-bottom:8px"><span class="tiny muted">Total <b style="color:var(--text)">${lb.total}</b></span><span class="tiny muted">Basics <b style="color:var(--text)">${lb.basic}</b></span><span class="tiny muted">Nonbasic <b style="color:var(--text)">${lb.nonbasic}</b></span><span class="tiny muted">Utility <b style="color:var(--text)">${lb.utility}</b></span><span class="tiny muted">Enter tapped <b style="color:${tapPct>35?'var(--danger)':'var(--text)'}">${lb.tapped}</b> (${tapPct}%)</span></div>
+        <div class="row" style="flex-wrap:wrap;gap:10px">${['W','U','B','R','G','C'].filter(k=>lb.src[k]).map(k=>`<div class="row" style="gap:5px">${pips([k])}<span class="tiny muted">${lb.src[k]}</span></div>`).join('')}</div>
+        <div class="tiny muted" style="margin-top:7px;opacity:.7">${tapPct>35?'Many lands enter tapped — that can slow your early turns.':'Lands producing each colour, counting duals/any-colour sources once per colour.'}</div></div>`; }
+
+    const crd=creatureDetail(d);
+    if(crd.count){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Creature Profile</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px 14px;margin-bottom:6px"><span class="tiny muted">Creatures <b style="color:var(--text)">${crd.count}</b></span><span class="tiny muted">Small ≤2 pw <b style="color:var(--text)">${crd.buckets.sm}</b></span><span class="tiny muted">Mid 3–4 <b style="color:var(--text)">${crd.buckets.md}</b></span><span class="tiny muted">Large 5+ <b style="color:var(--text)">${crd.buckets.lg}</b></span></div>
+      ${crd.top.length?`<div class="tiny muted">Biggest: ${crd.top.map(x=>esc(x.name)+' ('+x.p+')').join(', ')}</div>`:''}</div>`; }
   }
 
   const themes=themeDetect(d);
