@@ -1175,6 +1175,20 @@ function pipAnalysis(d){ const COLS=['W','U','B','R','G']; const demand={W:0,U:0
   if(!allow.length) allow=COLS.filter(col=>demand[col]>0);
   if(allow.length) COLS.forEach(col=>{ if(!allow.includes(col)){ demand[col]=0; sources[col]=0; } });
   return {demand, sources}; }
+// ---- statistical analysis (pure math, no API) ----
+function _logFact(n){ let s=0; for(let i=2;i<=n;i++) s+=Math.log(i); return s; }
+function _choose(n,k){ if(k<0||k>n||n<0) return 0; return Math.exp(_logFact(n)-_logFact(k)-_logFact(n-k)); }
+// hypergeometric: P(exactly x successes) drawing n from population N with K successes
+function hyper(x,N,K,n){ if(x<0||x>K||x>n||n-x>N-K) return 0; return _choose(K,x)*_choose(N-K,n-x)/_choose(N,n); }
+function hyperGE(x,N,K,n){ let p=0; for(let i=x;i<=Math.min(K,n);i++) p+=hyper(i,N,K,n); return Math.min(1,Math.max(0,p)); }
+function hyperLE(x,N,K,n){ let p=0; for(let i=0;i<=Math.min(x,Math.min(K,n));i++) p+=hyper(i,N,K,n); return Math.min(1,Math.max(0,p)); }
+function hyperRange(a,b,N,K,n){ let p=0; for(let i=a;i<=b;i++) p+=hyper(i,N,K,n); return Math.min(1,Math.max(0,p)); }
+// Library = everything except commander(s), which start in the command zone.
+function deckLibraryStats(d){ let N=0,lands=0,ramp=0; for(const id in d.cards){ const c=card(id); if(!c) continue; const q=d.cards[id]; N+=q; if(/\bLand\b/.test(c.type_line||'')) lands+=q; if(cardCategories(c).includes('ramp')) ramp+=q; } return {N,lands,ramp}; }
+// Frank Karsten's colored-source targets (99-card singleton, cast on curve ~90%).
+function karstenSources(pips,cmc){ cmc=Math.max(1,Math.min(7,Math.round(cmc||1))); pips=Math.max(1,Math.min(3,pips||1));
+  const T={1:{1:19,2:15,3:13,4:12,5:11,6:10,7:9},2:{2:27,3:22,4:19,5:17,6:16,7:15},3:{3:26,4:22,5:20,6:18,7:17}};
+  const row=T[pips]; let best=row[cmc]; if(best==null){ const keys=Object.keys(row).map(Number).sort((a,b)=>a-b); best=row[keys[0]]; for(const kk of keys){ if(kk<=cmc) best=row[kk]; } } return best; }
 function rarityBreakdown(d){ const r={mythic:0,rare:0,uncommon:0,common:0}; for(const id in d.cards){ const c=card(id); if(!c) continue; const k=(c.rarity||'').toLowerCase(); if(r[k]!=null) r[k]+=d.cards[id]; } return r; }
 function creatureProfile(d){ let count=0,pw=0,tf=0,ptn=0,big=null,bigP=-1; for(const id in d.cards){ const c=card(id); if(!c||!/\bCreature\b/.test(c.type_line||'')) continue; const q=d.cards[id]; count+=q; const p=parseInt(c.power,10),t=parseInt(c.toughness,10); if(!isNaN(p)){ pw+=p*q; ptn+=q; if(p>bigP){ bigP=p; big=c.name; } } if(!isNaN(t)) tf+=t*q; } return {count, avgP:ptn?(pw/ptn).toFixed(1):null, avgT:ptn?(tf/ptn).toFixed(1):null, big, bigP}; }
 const A_THEMES=[
@@ -1290,6 +1304,38 @@ function renderAnalyze(){
         <div class="pipbar"><div class="pipbar-s" style="width:${(pa.sources[k]/maxPip*100).toFixed(0)}%"></div></div></div>
         <span class="tiny muted" style="white-space:nowrap">${pa.demand[k]}◇ · ${pa.sources[k]}▲${short?' <b style="color:var(--danger)">low</b>':''}</span></div>`; });
     h+=`<div class="tiny muted" style="margin-top:2px;opacity:.7">Top bar (◇) = colored symbols your spells need · bottom (▲) = sources that make it.</div></div>`; }
+
+  // ---- Advanced statistical analysis: opening hands, land-drop consistency, Karsten mana base ----
+  const ls=deckLibraryStats(d);
+  if(ls.N>=7 && ls.lands>0){
+    const N=ls.N, L=ls.lands, pct=x=>Math.round(x*100)+'%';
+    const keepLo=2, keepHi=isCmd?5:4;
+    const pKeep=hyperRange(keepLo,keepHi,N,L,7), pScrew=hyperLE(1,N,L,7), pFlood=hyperGE(6,N,L,7), avgL=7*L/N;
+    const pRamp=ls.ramp>0?hyperGE(1,N,ls.ramp,7):null;
+    const grade=pKeep>=0.72?['Consistent','var(--ok)']:pKeep>=0.6?['Reasonable','var(--accent2)']:['Inconsistent','var(--danger)'];
+    h+=`<div class="panel"><div class="section-title" style="margin-top:0">Opening Hand <span style="float:right;color:${grade[1]};font-weight:700">${grade[0]}</span></div>
+      <div class="statgrid" style="margin-bottom:8px"><div class="stat"><div class="v">${avgL.toFixed(1)}</div><div class="l">Avg lands</div></div><div class="stat"><div class="v">${pct(pKeep)}</div><div class="l">Keepable</div></div><div class="stat"><div class="v">${pct(pScrew)}</div><div class="l">Screw ≤1</div></div><div class="stat"><div class="v">${pct(pFlood)}</div><div class="l">Flood ≥6</div></div></div>`;
+    if(pRamp!=null) h+=`<div class="tiny muted" style="margin-bottom:3px">Chance of a ramp piece in your opener: <b style="color:var(--text)">${pct(pRamp)}</b> <span style="opacity:.6">(${ls.ramp} in deck)</span></div>`;
+    h+=`<div class="tiny muted" style="opacity:.7">“Keepable” = ${keepLo}–${keepHi} lands in the opening seven; hands you’d keep rather than mulligan. Computed exactly (hypergeometric) over ${N} library cards.</div></div>`;
+
+    h+=`<div class="panel"><div class="section-title" style="margin-top:0">Hitting Land Drops</div>`;
+    for(let t=1;t<=5;t++){ const p=hyperGE(t,N,L,6+t); const col=p>=0.85?'var(--ok)':p>=0.65?'var(--accent2)':'var(--danger)';
+      h+=`<div class="row" style="gap:8px;align-items:center;margin-bottom:6px"><span class="tiny muted" style="width:52px">Turn ${t}</span><div class="pipbar" style="flex:1"><div class="pipbar-s" style="width:${(p*100).toFixed(0)}%;background:${col}"></div></div><span class="tiny muted" style="width:42px;text-align:right;color:${col};font-weight:700">${pct(p)}</span></div>`; }
+    h+=`<div class="tiny muted" style="margin-top:2px;opacity:.7">Odds you’ve made every land drop through turn n (on the play), so your curve comes online on time.</div></div>`;
+
+    const idColors=['W','U','B','R','G'].filter(k=>pa.demand[k]||pa.sources[k]);
+    if(idColors.length){
+      const rows=idColors.map(k=>{ let minCmc=99, tough=null, toughT=0;
+        for(const id in d.cards){ const c=card(id); if(!c||/\bLand\b/.test(c.type_line||'')) continue; const m=(c.mana_cost||'').match(new RegExp('\\{[^}]*'+k+'[^}]*\\}','g')); if(!m) continue; const cmc=Math.max(1,Math.round(c.cmc||0)); if(cmc<minCmc) minCmc=cmc; const t=karstenSources(m.length,cmc); if(t>toughT){ toughT=t; tough={name:c.name,pips:m.length,cmc}; } }
+        if(minCmc===99) minCmc=3; const target=karstenSources(1,minCmc), have=pa.sources[k]||0;
+        return {k,have,target,ratio:target?have/target:1,tough,toughT}; });
+      h+=`<div class="panel"><div class="section-title" style="margin-top:0">Mana Base Rating <span class="tiny muted" style="float:right;font-weight:400">vs Karsten targets</span></div>`;
+      rows.forEach(r=>{ const col=r.ratio>=1?'var(--ok)':r.ratio>=0.78?'var(--accent2)':'var(--danger)'; const verdict=r.ratio>=1?'good':r.ratio>=0.78?'a bit low':'low';
+        h+=`<div class="row between" style="margin-bottom:${r.tough&&r.toughT>r.target+2?'2':'8'}px;gap:8px"><div class="row" style="gap:7px;align-items:center">${pips([r.k])}<span class="tiny muted"><b style="color:var(--text)">${r.have}</b> sources · want ~${r.target}</span></div><span class="tiny" style="color:${col};font-weight:700">${verdict}</span></div>`;
+        if(r.tough && r.toughT>r.target+2) h+=`<div class="tiny muted" style="margin:0 0 8px 26px;opacity:.62">toughest cast: ${esc(r.tough.name)} (${('{'+r.k+'}').repeat(r.tough.pips)} at ${r.tough.cmc} MV wants ~${r.toughT})</div>`; });
+      h+=`<div class="tiny muted" style="margin-top:2px;opacity:.7">Frank Karsten’s guideline for casting your most colour-intensive card on curve ~90% of the time in a 99-card deck.</div></div>`;
+    }
+  }
 
   const themes=themeDetect(d);
   if(themes.length) h+=`<div class="panel"><div class="section-title" style="margin-top:0">Detected Strategy</div><div class="row" style="flex-wrap:wrap;gap:6px">${themes.map(t=>`<span class="athemetag">${esc(t.label)} · ${t.count}</span>`).join('')}</div><div class="tiny muted" style="margin-top:7px;opacity:.7">Themes inferred from card text — the biggest are your game plan.</div></div>`;
