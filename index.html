@@ -3453,9 +3453,11 @@ if('serviceWorker' in navigator){
   let _swReloaded=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(_swReloaded) return; _swReloaded=true; location.reload(); });
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('sw.js').then(reg=>{
+    // updateViaCache:'none' → the browser always fetches sw.js from the network (never its HTTP cache),
+    // so a new version is detected immediately instead of being masked by a stale cached sw.js.
+    navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(reg=>{
       reg.update();
-      setInterval(()=>{ reg.update().catch(()=>{}); }, 60000); // check for a new version every minute
+      setInterval(()=>{ reg.update().catch(()=>{}); }, 30000); // check for a new version every 30s
       // when an update is found, the new SW (skipWaiting in sw.js) activates and claims → controllerchange reloads
     }).catch(()=>{});
   });
