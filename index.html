@@ -1014,7 +1014,7 @@ function renderCollection(){
 }
 
 // ---------- ANALYZE ----------
-function selectAnalyzeDeck(id){ state.analyzeDeckId=id; render(); const d=state.decks.find(x=>x.id===id); if(d){ enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[])); if(!state.analyzeRecs[id]) fetchRecs(d); } }
+function selectAnalyzeDeck(id){ state.analyzeDeckId=id; state.deckQ=''; state.deckQA=''; render(); const d=state.decks.find(x=>x.id===id); if(d){ enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[])); if(!state.analyzeRecs[id]) fetchRecs(d); } }
 function closeAnalyze(){ state.analyzeDeckId=null; render(); }
 async function loadCombos(deckId){
   const d=state.decks.find(x=>x.id===deckId); if(!d) return;
@@ -1302,6 +1302,85 @@ function bracketUpgrade(d, plScore, br){
   const pool=UPGRADE_CARDS.filter(u=>onColor(u.ci)&&!inDeck.has(u.name.toLowerCase()));
   return {next, nextLabel:L[next], g, needG, needScore, mode, gapG:Math.max(0,needG-g), gapScore:Math.max(0,needScore-plScore),
     gcPool:pool.filter(u=>gcSet.has(u.name.toLowerCase())), powPool:pool.filter(u=>!gcSet.has(u.name.toLowerCase())) }; }
+// ---- Offline deck assistant: answers questions from the deck's own computed stats (no API, free) ----
+function answerDeckQuestion(d, raw){
+  const q=(raw||'').toLowerCase().trim(); if(!q) return '';
+  const isCmd=d.format==='Commander'; const n=deckCardCount(d);
+  let lands=0, avgNum=0, avgDen=0;
+  for(const id in d.cards){ const c=card(id); if(!c) continue; const qt=d.cards[id]; if(/\bLand\b/.test(c.type_line||'')) lands+=qt; else { avgNum+=(c.cmc||0)*qt; avgDen+=qt; } }
+  const avg=avgDen?avgNum/avgDen:0;
+  const rb=roleBalance(d), cat=rb.cat;
+  const has=(...ws)=>ws.some(w=>q.includes(w));
+  const P=s=>`<div class="tiny" style="margin-bottom:5px;line-height:1.55">${s}</div>`;
+  const V=(ok,txt)=>`<span style="color:${ok?'var(--ok)':'var(--danger)'};font-weight:700">${txt}</span>`;
+  if(has('upgrade','improve','better','stronger','next bracket','level up','more competitive','make it good')){
+    const dv=deckValue(d), pl=powerLevel(d,{avg:avg.toFixed(2),lands,catCount:cat,value:dv.total,n}), br=isCmd?commanderBracket(d,+pl.score):null, up=br?bracketUpgrade(d,+pl.score,br):null;
+    if(!up) return P('Set a commander (Commander format) to get bracket-upgrade guidance.');
+    if(up.max) return P('This deck is already <b>Bracket 5 · cEDH</b> — the top of the ladder.');
+    const gc=up.gcPool.slice(0,4).map(u=>esc(u.name)), pw=up.powPool.slice(0,4).map(u=>esc(u.name));
+    return P(`You're <b>Bracket ${br.n} · ${esc(br.label)}</b>. To reach <b>Bracket ${up.next} · ${esc(up.nextLabel)}</b>: ${up.mode==='score'?`raise power to ~${up.needScore} (now ${pl.score})`:`run ${up.needG}+ Game Changers (you have ${up.g}) ${up.mode==='and'?'and':'or'} reach power ~${up.needScore} (now ${pl.score})`}.`)
+      + (gc.length?P(`Add Game Changers: <b>${gc.join(', ')}</b>.`):'') + (pw.length?P(`Power staples: <b>${pw.join(', ')}</b>.`):'') + P('Full tappable list is in the “Upgrade to Bracket” panel below.');
+  }
+  if(has('power level','how strong','how good','bracket','how competitive','how powerful','tier')){
+    const dv=deckValue(d), pl=powerLevel(d,{avg:avg.toFixed(2),lands,catCount:cat,value:dv.total,n}), br=isCmd?commanderBracket(d,+pl.score):null;
+    return P(`Estimated power <b>${pl.score}/10</b> — ${esc(pl.label)}.`)+(br?P(`Commander <b>Bracket ${br.n} · ${esc(br.label)}</b>${br.gameChangers?` (${br.gameChangers} game changer${br.gameChangers>1?'s':''})`:''}.`):'')+(pl.reasons.length?P('Drivers: '+pl.reasons.map(esc).join('; ')+'.'):'');
+  }
+  if(has('land','mana base','mana screw','enough mana','color screw','fixing')){
+    const rl=recommendedLands(d,avg), diff=lands-rl.rec;
+    return P(`You have <b>${lands}</b> lands; I'd recommend ~<b>${rl.rec}</b> for this curve${rl.ramp?` (with ${rl.ramp} ramp)`:''}.`)+P(Math.abs(diff)<=1?V(true,'That looks on target.'):diff<0?V(false,`Add ~${-diff} more`)+' so you hit your land drops.':V(false,`~${diff} too many`)+' — consider trimming for spells.');
+  }
+  if(has('curve','average mana','mana value','too high','too slow','too expensive','avg mv','mana cost')){
+    const mv=mvDetail(d);
+    return P(`Average mana value <b>${avg.toFixed(2)}</b> (median ${mv.median}). Split: ${mv.early} early (0–2), ${mv.mid} mid (3–4), ${mv.late} top-end (5+).`)+P(avg<=2.8?V(true,'Low, fast curve.'):avg<=3.4?'A healthy midrange curve.':V(false,'On the heavy side')+' — add cheap ramp or trim some top-end.');
+  }
+  if(has('ramp','acceleration','speed up','mana rock','mana dork')){ const t=rb.T.ramp; return P(`Ramp pieces: <b>${cat.ramp}</b>${t?` (target ~${t})`:''}. `+(cat.ramp>=t?V(true,'Solid.'):V(false,'Add a few more')+' to cast your commander and big spells on time.')); }
+  if(has('draw','card advantage','card draw','refill')){ const t=rb.T.draw; return P(`Card-draw sources: <b>${cat.draw}</b>${t?` (target ~${t})`:''}. `+(cat.draw>=t?V(true,'Good engine.'):V(false,'Light')+' — add card-advantage engines so you don’t run out of gas.')); }
+  if(has('board wipe','wipe','sweeper','wrath','mass removal')){ return P(`Board wipes: <b>${cat.wipe}</b>. `+(cat.wipe>=2?V(true,'Enough to reset the board.'):V(false,'Consider 2–3')+' to catch up when you fall behind.')); }
+  if(has('counter','counterspell')){ return P(`Counterspells: <b>${cat.counter}</b>. `+(cat.counter>=3?V(true,'A real counter suite.'):cat.counter>0?'A few — fine for a reactive deck.':'None — you can’t stop key spells on the stack.')); }
+  if(has('removal','interaction','answers','spot','destroy','deal with')){
+    const is=interactionSuite(d), total=is.spot+is.wipe+is.counter+is.artench+is.bounce;
+    return P(`Interaction: <b>${is.spot}</b> spot removal, <b>${is.wipe}</b> wipes, <b>${is.counter}</b> counters, <b>${is.artench}</b> artifact/ench removal, <b>${is.bounce}</b> bounce — ${total} total.`)+P(total>=10?V(true,'A healthy answer package.'):total>=6?'Reasonable — a couple more wouldn’t hurt.':V(false,'Light on interaction')+' — you may struggle to answer threats.');
+  }
+  if(has('combo','infinite','synerg')){
+    const cb=state.analyzeCombos&&state.analyzeCombos[d.id];
+    if(!cb||cb.status==='loading') return P('Still scanning for combos — check the Combos panel below in a moment.');
+    if(cb.status!=='ok') return P('Couldn’t load the combo database — see the Combos panel below.');
+    const inD=(cb.inDeck||[]).length, al=(cb.almost||[]).length;
+    return P(`Complete combos in the deck: <b>${inD}</b>. One card away: <b>${al}</b>.`)+(inD?P('Top: '+cb.inDeck.slice(0,3).map(x=>esc(x.cards.join(' + '))).join('; ')+'.'):P('No 2-card infinite combos detected — the Combos panel lists near-misses.'));
+  }
+  if(has('worth','value','price','expensive','cost','how much','money','budget')){
+    const dv=deckValue(d); return P(`Estimated deck value <b>$${dv.total.toFixed(0)}</b>${dv.top.length?`. Priciest: ${dv.top.slice(0,3).map(x=>esc(x.name)+' $'+x.price.toFixed(0)).join(', ')}`:''}.`);
+  }
+  if(has('cut','trim','remove','take out','too many')){
+    const nl=[]; for(const id in d.cards){ if(id===d.commander) continue; const c=card(id); if(!c||/\bLand\b/.test(c.type_line||'')) continue; nl.push({name:c.name,cmc:c.cmc||0}); }
+    nl.sort((a,b)=>b.cmc-a.cmc); const top=nl.slice(0,4).map(x=>esc(x.name)+' ('+Math.round(x.cmc)+')');
+    return P('Start with the least-impactful high-cost cards and redundant effects.'+(top.length?' Highest-MV nonlands: <b>'+top.join(', ')+'</b>.':''))+P('Also trim anything that doesn’t advance your main plan or fix a weakness.');
+  }
+  if(has('consistent','opening hand','keepable','mulligan','how often','odds','probability','chance')){
+    let L=lands,N=0; for(const id in d.cards){ if(id===d.commander) continue; const c=card(id); if(c) N+=d.cards[id]; }
+    if(N<7) return P('Add more cards first to compute opening-hand odds.');
+    const keep=hyperRange(2,isCmd?5:4,N,L,7)*100, screw=hyperLE(1,N,L,7)*100;
+    return P(`Keepable opening hand: <b>${Math.round(keep)}%</b>; mana-screwed (≤1 land): <b>${Math.round(screw)}%</b>.`)+P(keep>=72?V(true,'Consistent starts.'):keep>=60?'Reasonably consistent.':V(false,'A bit inconsistent')+' — adjust your land count.');
+  }
+  if(has('win','wincon','how do i win','close out','finish')){
+    const cd=creatureDetail(d), cb=state.analyzeCombos&&state.analyzeCombos[d.id], combos=cb&&cb.status==='ok'?(cb.inDeck||[]).length:0, bits=[];
+    if(combos) bits.push(`combo kills (${combos} in deck)`);
+    if(cd.buckets.lg>=6) bits.push(`beatdown with ${cd.buckets.lg} big creatures`);
+    const cmd=d.commander&&card(d.commander); if(cmd&&/\bCreature\b/.test(cmd.type_line||'')&&parseInt(cmd.power,10)>=4) bits.push('commander damage');
+    const th=themeDetect(d); if(th.length) bits.push(th[0].label.toLowerCase()+' engine');
+    return P(bits.length?('Likely win routes: <b>'+bits.join(', ')+'</b>.'):'No dedicated win condition stands out — you’ll grind value. Consider a finisher or a compact combo.');
+  }
+  if(has('strategy','theme','game plan','what does this deck do','archetype')){
+    const th=themeDetect(d); return th.length?P('Main themes: <b>'+th.slice(0,4).map(t=>esc(t.label)+' ('+t.count+')').join(', ')+'</b>.'):P('No strong theme detected yet — reads as a goodstuff / midrange pile.');
+  }
+  if(has('creature','board presence')){ const cd=creatureDetail(d); return P(`Creatures: <b>${cd.count}</b> — ${cd.buckets.sm} small (≤2 pw), ${cd.buckets.md} mid, ${cd.buckets.lg} large (5+).`); }
+  if(has('color','identity','splash')){ const {counts}=deckColorCounts(d); const parts=Object.keys(counts).filter(k=>counts[k]).map(k=>COLOR_NAMES[k]+' '+counts[k]); return P('Colors: <b>'+(parts.join(', ')||'colorless')+'</b>.'); }
+  if(has('legal','banned','allowed','restricted')){ const bad=legalityIssues(d); return bad.length?P('Legality issues: '+bad.map(esc).join('; ')+'.'):P(V(true,'No legality problems detected.')); }
+  if(has('tutor','search my library','find a card')){ return P(`Tutors: <b>${cat.tutor}</b>. `+(cat.tutor>=2?'They boost consistency (and power/bracket).':'Few or none — add tutors to find key pieces more often.')); }
+  return `<div class="tiny muted" style="line-height:1.6">I answer from this deck's data — try <b>lands</b>, <b>curve</b>, <b>ramp</b>, <b>card draw</b>, <b>removal</b>, <b>counters</b>, <b>combos</b>, <b>power / bracket</b>, <b>how to win</b>, <b>what to cut</b>, <b>value</b>, or <b>how to upgrade</b>.</div>`;
+}
+function askDeckQ(deckId){ const d=state.decks.find(x=>x.id===deckId); if(!d) return; const val=($('#deckQ')&&$('#deckQ').value)||''; state.deckQ=val; const ans=answerDeckQuestion(d,val); state.deckQA=ans; const el=$('#deckQA'); if(el) el.innerHTML = ans || '<div class="tiny muted">Type a question and tap Ask.</div>'; }
+function askDeckQPreset(deckId, text){ const inp=$('#deckQ'); if(inp) inp.value=text; state.deckQ=text; askDeckQ(deckId); }
 function legalityIssues(d){ const fmt=(d.format||'commander').toLowerCase(); const key=fmt==='casual'?'commander':fmt; const bad=[]; for(const id in d.cards){ const c=card(id); if(!c||!c.legal) continue; const st=c.legal[key]; if(st==='banned') bad.push(c.name+' — banned'); else if(st==='restricted') bad.push(c.name+' — restricted'); } return bad; }
 
 function renderAnalyze(){
@@ -1355,6 +1434,11 @@ function renderAnalyze(){
 
   let h=`<div class="detail-head"><button class="back" onclick="closeAnalyze()">‹</button><div class="ttl">${esc(d.name)}</div></div>
     <div class="statgrid"><div class="stat"><div class="v">${n}</div><div class="l">Cards</div></div><div class="stat"><div class="v">${lands}</div><div class="l">Lands</div></div><div class="stat"><div class="v">${avg}</div><div class="l">Avg MV</div></div></div>`;
+  const qaPresets=['Do I have enough lands?','Is my curve too high?','How do I win?','How can I upgrade it?','What should I cut?','How much is it worth?'];
+  h+=`<div class="panel"><div class="section-title" style="margin-top:0">Ask about this deck</div>
+    <div class="row" style="gap:8px"><input id="deckQ" class="scan-input" style="flex:1;margin:0" placeholder="e.g. do I have enough lands?" value="${esc(state.deckQ||'')}" autocomplete="off" onkeydown="if(event.key==='Enter'){askDeckQ('${d.id}');this.blur();}"><button class="btn gold sm" onclick="askDeckQ('${d.id}')">Ask</button></div>
+    <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px">${qaPresets.map(p=>`<button class="athemetag" style="cursor:pointer" onclick="askDeckQPreset('${d.id}',this.textContent)">${p}</button>`).join('')}</div>
+    <div id="deckQA" style="margin-top:10px">${state.deckQA||'<div class="tiny muted" style="opacity:.75">Answers come from this deck’s own stats — free and offline. Tap a suggestion or type a question.</div>'}</div></div>`;
   h+=`<div class="panel"><div class="section-title" style="margin-top:0">Card Types</div><div class="row" style="flex-wrap:wrap;gap:12px">${groups.map(g=>`<span class="tiny muted">${g.name}: <b style="color:var(--text)">${g.count}</b></span>`).join('')||'<span class="tiny muted">No cards yet</span>'}</div></div>`;
   if(total){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Colors</div><div class="row" style="flex-wrap:wrap;gap:10px">`; Object.keys(counts).filter(k=>counts[k]).forEach(k=>{ h+=`<div class="row" style="gap:5px">${pips([k])}<span class="tiny muted">${COLOR_NAMES[k]} ${counts[k]}</span></div>`; }); h+=`</div></div>`; }
   if(avgDen){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Mana Curve (nonland)</div><div class="curve">`; buckets.forEach((cnt,i)=>{ h+=`<div class="bar"><span class="cnt">${cnt||''}</span><div class="fill" style="height:${cnt/maxB*100}%"></div><span class="lbl">${i===7?'7+':i}</span></div>`; }); h+=`</div></div>`; }
@@ -3427,7 +3511,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,upgradeSearch,
   openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,mtgoFilePicked,openBgPicker,setBg,
-  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,loadCombos,loadMeta,openMetaDeck,closeMetaDeck,randomCommander,
+  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,askDeckQ,askDeckQPreset,loadCombos,loadMeta,openMetaDeck,closeMetaDeck,randomCommander,
   openShoppingList,
   exportDeck,copyDeckText,shareDeckText,
   designArt,designField,setDesignFrame,saveDesignCard,newDesignCard,editDesignCard,deleteDesignCard,
