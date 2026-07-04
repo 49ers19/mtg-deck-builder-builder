@@ -1937,11 +1937,17 @@ function startMatchmaking(){
         if(me<d.from){
           mm.matched=true; if(mm.timer) clearInterval(mm.timer);
           const room=genCode();
-          client.publish(LOBBY_TOPIC, JSON.stringify({t:'match',a:me,b:d.from,room}), {qos:0}, ()=>{ stopMatchmakingClient(); enterMatchedGame(room, true); });
+          const msg=JSON.stringify({t:'match',a:me,b:d.from,room});
+          // QoS 1 so the callback fires only after the broker has the message and can relay it to the opponent
+          client.publish(LOBBY_TOPIC, msg, {qos:1}, ()=>{ enterMatchedGame(room, true); });
+          // resend a couple times and keep the lobby alive briefly so the opponent reliably receives it
+          setTimeout(()=>{ try{ client.publish(LOBBY_TOPIC, msg, {qos:1}); }catch(e){} }, 500);
+          setTimeout(()=>{ try{ client.publish(LOBBY_TOPIC, msg, {qos:1}); }catch(e){} }, 1200);
+          setTimeout(()=>stopMatchmakingClient(), 3000);
         }
       } else if(d.t==='match' && (d.a===me||d.b===me)){
         mm.matched=true; if(mm.timer) clearInterval(mm.timer);
-        const room=d.room; stopMatchmakingClient(); enterMatchedGame(room, false);
+        const room=d.room; setTimeout(()=>stopMatchmakingClient(),300); enterMatchedGame(room, false);
       }
     });
     client.on('error',()=>{ const mm=state.matchmaking; if(mm){ mm.status='error'; if($('#matchBody')) showMatchModal(); } });
