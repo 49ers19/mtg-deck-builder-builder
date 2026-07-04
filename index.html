@@ -1167,6 +1167,13 @@ function pipAnalysis(d){ const COLS=['W','U','B','R','G']; const demand={W:0,U:0
   for(const id in d.cards){ const c=card(id); if(!c) continue; const q=d.cards[id];
     if(!/\bLand\b/.test(c.type_line||'')){ const mc=c.mana_cost||''; COLS.forEach(col=>{ const m=mc.match(new RegExp('\\{[^}]*'+col+'[^}]*\\}','g')); if(m) demand[col]+=m.length*q; }); }
     (c.produced||[]).forEach(col=>{ if(sources[col]!=null) sources[col]+=q; }); }
+  // Only count the deck's actual colors — the commander's identity if set, else the colors the spells need.
+  // (Prevents any-color cards like Command Tower / Arcane Signet, which Scryfall lists as producing all 5,
+  //  from making a 2-color deck look like it needs every color.)
+  const cmd=d.commander&&card(d.commander);
+  let allow=cmd?((cmd.ci&&cmd.ci.length?cmd.ci:cmd.colors)||[]):[];
+  if(!allow.length) allow=COLS.filter(col=>demand[col]>0);
+  if(allow.length) COLS.forEach(col=>{ if(!allow.includes(col)){ demand[col]=0; sources[col]=0; } });
   return {demand, sources}; }
 function rarityBreakdown(d){ const r={mythic:0,rare:0,uncommon:0,common:0}; for(const id in d.cards){ const c=card(id); if(!c) continue; const k=(c.rarity||'').toLowerCase(); if(r[k]!=null) r[k]+=d.cards[id]; } return r; }
 function creatureProfile(d){ let count=0,pw=0,tf=0,ptn=0,big=null,bigP=-1; for(const id in d.cards){ const c=card(id); if(!c||!/\bCreature\b/.test(c.type_line||'')) continue; const q=d.cards[id]; count+=q; const p=parseInt(c.power,10),t=parseInt(c.toughness,10); if(!isNaN(p)){ pw+=p*q; ptn+=q; if(p>bigP){ bigP=p; big=c.name; } } if(!isNaN(t)) tf+=t*q; } return {count, avgP:ptn?(pw/ptn).toFixed(1):null, avgT:ptn?(tf/ptn).toFixed(1):null, big, bigP}; }
