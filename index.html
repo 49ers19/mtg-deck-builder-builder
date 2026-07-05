@@ -1384,10 +1384,53 @@ function answerDeckQuestion(d, raw){
   if(has('color','identity','splash')){ const {counts}=deckColorCounts(d); const parts=Object.keys(counts).filter(k=>counts[k]).map(k=>COLOR_NAMES[k]+' '+counts[k]); return P('Colors: <b>'+(parts.join(', ')||'colorless')+'</b>.'); }
   if(has('legal','banned','allowed','restricted')){ const bad=legalityIssues(d); return bad.length?P('Legality issues: '+bad.map(esc).join('; ')+'.'):P(V(true,'No legality problems detected.')); }
   if(has('tutor','search my library','find a card')){ return P(`Tutors: <b>${cat.tutor}</b>. `+(cat.tutor>=2?'They boost consistency (and power/bracket).':'Few or none — add tutors to find key pieces more often.')); }
-  return `<div class="tiny muted" style="line-height:1.6">I answer from this deck's data — try <b>lands</b>, <b>curve</b>, <b>ramp</b>, <b>card draw</b>, <b>removal</b>, <b>counters</b>, <b>combos</b>, <b>power / bracket</b>, <b>how to win</b>, <b>what to cut</b>, <b>value</b>, or <b>how to upgrade</b>.</div>`;
+  return null; // unrecognised — caller may escalate to Gemini AI if configured
 }
-function askDeckQ(deckId){ const d=state.decks.find(x=>x.id===deckId); if(!d) return; const val=($('#deckQ')&&$('#deckQ').value)||''; state.deckQ=val; const ans=answerDeckQuestion(d,val); state.deckQA=ans; const el=$('#deckQA'); if(el) el.innerHTML = ans || '<div class="tiny muted">Type a question and tap Ask.</div>'; }
+// Optional Gemini AI (via a free proxy the user sets up). Empty = offline-only.
+let AI_URL = (function(){ try{ return localStorage.getItem('grimoire_ai_url')||''; }catch(e){ return ''; } })();
+function setDeckQA(html){ state.deckQA=html; const el=$('#deckQA'); if(el) el.innerHTML=html; }
+function askDeckQ(deckId){
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  const val=(($('#deckQ')&&$('#deckQ').value)||'').trim(); state.deckQ=val;
+  if(!val){ setDeckQA('<div class="tiny muted">Type a question and tap Ask.</div>'); return; }
+  const ans=answerDeckQuestion(d,val);
+  if(ans){ setDeckQA(ans); return; }                     // answered free & offline
+  if(AI_URL){ setDeckQA('<div class="tiny muted"><span class="mini-spin"></span> Thinking…</div>'); askGemini(d,val); }
+  else setDeckQA(aiFallbackHTML());
+}
 function askDeckQPreset(deckId, text){ const inp=$('#deckQ'); if(inp) inp.value=text; state.deckQ=text; askDeckQ(deckId); }
+function aiFallbackHTML(){
+  return `<div class="tiny muted" style="line-height:1.6">I can answer that from your deck's data — try <b>lands</b>, <b>curve</b>, <b>ramp</b>, <b>removal</b>, <b>combos</b>, <b>power / bracket</b>, <b>how to win</b>, <b>what to cut</b>, or <b>how to upgrade</b>.</div>`
+    + `<div class="tiny" style="margin-top:7px">Want to ask anything at all? <a onclick="openAiSetup()" style="color:var(--accent2);cursor:pointer;font-weight:600">Enable Gemini AI</a> (free).</div>`;
+}
+function deckContextForAI(d){
+  const cmd=d.commander&&card(d.commander); let lands=0,aN=0,aD=0; const list=[];
+  for(const id in d.cards){ const c=card(id); if(!c) continue; const q=d.cards[id]; if(/\bLand\b/.test(c.type_line||'')) lands+=q; else { aN+=(c.cmc||0)*q; aD+=q; } list.push((q>1?q+'x ':'')+c.name); }
+  const avg=aD?(aN/aD).toFixed(2):'0'; const {counts}=deckColorCounts(d);
+  const colors=Object.keys(counts).filter(k=>counts[k]).map(k=>COLOR_NAMES[k]).join('/')||'colorless';
+  return `Deck name: ${d.name}\nFormat: ${d.format||'Casual'}\nCommander: ${cmd?cmd.name:'none'}\nColors: ${colors}\nTotals: ${deckCardCount(d)} cards, ${lands} lands, avg mana value ${avg}\nDecklist: ${list.join(', ')}`;
+}
+async function askGemini(d, q){
+  try{
+    const r=await fetch(AI_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,context:deckContextForAI(d)})});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data=await r.json(); const text=(data&&data.answer)||'No answer came back.';
+    setDeckQA(`<div class="tiny" style="line-height:1.65;white-space:pre-wrap">${esc(text)}</div><div class="tiny muted" style="margin-top:7px;opacity:.6">Answered by Google Gemini · may be imperfect · <a onclick="openAiSetup()" style="color:var(--accent2);cursor:pointer">AI settings</a></div>`);
+  }catch(e){ setDeckQA(`<div class="tiny" style="color:var(--danger)">Couldn’t reach the AI (${esc(e.message)}). <a onclick="openAiSetup()" style="color:var(--accent2);cursor:pointer">Check AI setup</a>.</div>`); }
+}
+function openAiSetup(){
+  modalRoot.innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>AI answers (optional)</h3>
+    <div class="tiny muted" style="line-height:1.6;margin-bottom:10px">The built-in assistant is free &amp; offline. To also answer <b>open-ended</b> questions, paste your Gemini proxy URL (a free Cloudflare Worker — see setup notes). Leave blank to stay fully offline.</div>
+    <input id="aiUrlInput" class="scan-input" placeholder="https://your-worker.workers.dev" value="${esc(AI_URL)}" autocomplete="off" style="margin-bottom:10px">
+    <div class="tiny muted" style="line-height:1.55;margin-bottom:12px;opacity:.75">When enabled, your question and a summary of the deck are sent to that URL → Google Gemini. Don’t enable if that isn’t OK with you.</div>
+    <button class="btn gold full" onclick="saveAiUrl()">Save</button>
+    ${AI_URL?'<button class="btn ghost full danger" style="margin-top:8px" onclick="clearAiUrl()">Turn AI off</button>':''}
+    <button class="btn ghost full" style="margin-top:8px" onclick="closeModal()">Cancel</button>
+  </div></div>`;
+}
+function saveAiUrl(){ const v=(($('#aiUrlInput')&&$('#aiUrlInput').value)||'').trim(); AI_URL=v; try{ v?localStorage.setItem('grimoire_ai_url',v):localStorage.removeItem('grimoire_ai_url'); }catch(e){} closeModal(); toast(v?'AI answers enabled':'AI turned off'); if(state.tab==='analyze') render(); }
+function clearAiUrl(){ AI_URL=''; try{ localStorage.removeItem('grimoire_ai_url'); }catch(e){} closeModal(); toast('AI turned off'); if(state.tab==='analyze') render(); }
 function legalityIssues(d){ const fmt=(d.format||'commander').toLowerCase(); const key=fmt==='casual'?'commander':fmt; const bad=[]; for(const id in d.cards){ const c=card(id); if(!c||!c.legal) continue; const st=c.legal[key]; if(st==='banned') bad.push(c.name+' — banned'); else if(st==='restricted') bad.push(c.name+' — restricted'); } return bad; }
 
 function renderAnalyze(){
@@ -1445,7 +1488,8 @@ function renderAnalyze(){
   h+=`<div class="panel"><div class="section-title" style="margin-top:0">Ask about this deck</div>
     <div class="row" style="gap:8px"><input id="deckQ" class="scan-input" style="flex:1;margin:0" placeholder="e.g. do I have enough lands?" value="${esc(state.deckQ||'')}" autocomplete="off" onkeydown="if(event.key==='Enter'){askDeckQ('${d.id}');this.blur();}"><button class="btn gold sm" onclick="askDeckQ('${d.id}')">Ask</button></div>
     <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px">${qaPresets.map(p=>`<button class="athemetag" style="cursor:pointer" onclick="askDeckQPreset('${d.id}',this.textContent)">${p}</button>`).join('')}</div>
-    <div id="deckQA" style="margin-top:10px">${state.deckQA||'<div class="tiny muted" style="opacity:.75">Answers come from this deck’s own stats — free and offline. Tap a suggestion or type a question.</div>'}</div></div>`;
+    <div id="deckQA" style="margin-top:10px">${state.deckQA||'<div class="tiny muted" style="opacity:.75">Answers come from this deck’s own stats — free and offline. Tap a suggestion or type a question.</div>'}</div>
+    <div class="tiny muted" style="margin-top:9px;opacity:.75">${AI_URL?'Gemini AI: <b style="color:var(--ok)">on</b> · <a onclick="openAiSetup()" style="color:var(--accent2);cursor:pointer">settings</a>':'<a onclick="openAiSetup()" style="color:var(--accent2);cursor:pointer">Enable Gemini AI</a> to ask open-ended questions (free)'}</div></div>`;
   h+=`<div class="panel"><div class="section-title" style="margin-top:0">Card Types</div><div class="row" style="flex-wrap:wrap;gap:12px">${groups.map(g=>`<span class="tiny muted">${g.name}: <b style="color:var(--text)">${g.count}</b></span>`).join('')||'<span class="tiny muted">No cards yet</span>'}</div></div>`;
   if(total){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Colors</div><div class="row" style="flex-wrap:wrap;gap:10px">`; Object.keys(counts).filter(k=>counts[k]).forEach(k=>{ h+=`<div class="row" style="gap:5px">${pips([k])}<span class="tiny muted">${COLOR_NAMES[k]} ${counts[k]}</span></div>`; }); h+=`</div></div>`; }
   if(avgDen){ h+=`<div class="panel"><div class="section-title" style="margin-top:0">Mana Curve (nonland)</div><div class="curve">`; buckets.forEach((cnt,i)=>{ h+=`<div class="bar"><span class="cnt">${cnt||''}</span><div class="fill" style="height:${cnt/maxB*100}%"></div><span class="lbl">${i===7?'7+':i}</span></div>`; }); h+=`</div></div>`; }
@@ -3612,7 +3656,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
   startAddingTo,addToDeckDirect,finishAdding,upgradeSearch,
   openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,mtgoFilePicked,openBgPicker,setBg,
-  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,askDeckQ,askDeckQPreset,loadCombos,loadMeta,openMetaDeck,closeMetaDeck,randomCommander,
+  setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,askDeckQ,askDeckQPreset,openAiSetup,saveAiUrl,clearAiUrl,loadCombos,loadMeta,openMetaDeck,closeMetaDeck,randomCommander,
   openShoppingList,
   exportDeck,copyDeckText,shareDeckText,
   designArt,designField,setDesignFrame,saveDesignCard,newDesignCard,editDesignCard,deleteDesignCard,
