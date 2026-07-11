@@ -631,6 +631,24 @@ function renderDeckDetail(){
     <button class="btn gold full" style="margin-bottom:8px" onclick="startAddingTo('${d.id}')">＋ Add cards to this deck</button>
     <button class="btn full" style="margin-bottom:12px" onclick="exportDeck('${d.id}')">Export / share deck</button>`;
 
+  // Budget & Buy
+  {
+    const store=state.buyStore==='ck'?'ck':'tcg', storeName=store==='ck'?'Card Kingdom':'TCGplayer';
+    const pb=deckPriceBreakdown(d), budget=+d.budget||0;
+    h+=`<div class="panel"><div class="section-title" style="margin-top:0">Budget &amp; Buy</div>
+      <div class="pc-group" style="margin-bottom:11px"><button class="pc-btn ${store==='tcg'?'on':''}" onclick="setBuyStore('tcg')">TCGplayer</button><button class="pc-btn ${store==='ck'?'on':''}" onclick="setBuyStore('ck')">Card Kingdom</button></div>
+      <div class="row between" style="margin-bottom:${budget>0?'6':'10'}px"><span class="tiny muted">Deck total (est.)</span><span style="font-weight:700;font-size:15px">$${pb.total.toFixed(2)}</span></div>`;
+    if(budget>0){
+      const over=pb.total>budget, pctUsed=Math.min(100, budget?pb.total/budget*100:0);
+      h+=`<div class="pipbar" style="height:9px;margin-bottom:5px"><div class="pipbar-s" style="width:${pctUsed.toFixed(0)}%;background:${over?'var(--danger)':'var(--ok)'}"></div></div>
+        <div class="row between tiny" style="margin-bottom:10px"><span class="muted">Budget $${budget.toFixed(2)}</span><span style="color:${over?'var(--danger)':'var(--ok)'};font-weight:700">${over?('$'+(pb.total-budget).toFixed(2)+' over'):('$'+(budget-pb.total).toFixed(2)+' left')}</span></div>`;
+    }
+    h+=`<button class="btn full sm" style="margin-bottom:9px" onclick="openDeckModal('${d.id}')">${budget>0?'Edit budget ($'+budget.toFixed(0)+')':'＋ Set a budget'}</button>
+      <button class="btn gold full" onclick="deckBuyAll('${d.id}',false)">Add all ${pb.allNames.length} card${pb.allNames.length!==1?'s':''} to ${storeName} cart</button>`;
+    if(pb.needNames.length && pb.needNames.length<pb.allNames.length) h+=`<button class="btn full" style="margin-top:8px" onclick="deckBuyAll('${d.id}',true)">Only the ${pb.needNames.length} I don’t own (~$${pb.need.toFixed(2)})</button>`;
+    h+=`<div class="tiny muted" style="margin-top:9px;opacity:.7">Prices are estimates (Scryfall / TCGplayer market)${pb.unpriced?` · ${pb.unpriced} card${pb.unpriced>1?'s':''} not priced yet`:''}. ${store==='ck'?'Card Kingdom opens its deck builder with your list copied to paste.':'Opens a TCGplayer cart with every card pre-filled.'}</div></div>`;
+  }
+
   // color identity bar
   if(total){
     h += `<div class="panel"><div class="section-title" style="margin-top:0">Color Breakdown</div><div class="row" style="flex-wrap:wrap;gap:10px">`;
@@ -767,7 +785,7 @@ function ckLink(cd){ return 'https://www.cardkingdom.com/catalog/search?search=h
 function tcgMassLink(names){ return 'https://www.tcgplayer.com/massentry?productline=Magic&c='+encodeURIComponent((names||[]).map(n=>'1 '+n).join('||')); }
 function addToWishlist(cardId){ const c=state._resultMap&&state._resultMap[cardId]; if(c) cacheCard(c); state.wishlist[cardId]=1; DB.save(); toast('Added to wishlist'); }
 function removeWishlist(cardId){ delete state.wishlist[cardId]; DB.save(); renderCollection(); }
-function setBuyStore(s){ state.buyStore=(s==='ck'?'ck':'tcg'); try{ localStorage.setItem('pdb_store',state.buyStore); }catch(e){} renderCollection(); }
+function setBuyStore(s){ state.buyStore=(s==='ck'?'ck':'tcg'); try{ localStorage.setItem('pdb_store',state.buyStore); }catch(e){} if(state.openDeckId) renderDeckDetail(); else if(state.tab==='collection') renderCollection(); else render(); }
 function buyAllStore(){
   const ids=Object.keys(state.wishlist).filter(id=>state.wishlist[id]);
   const names=ids.map(id=>(card(id)||{}).name).filter(Boolean);
@@ -1173,6 +1191,35 @@ async function generateDeck(cmd, source){
 }
 // ---------- deep (free) analysis helpers, all computed from cached Scryfall data ----------
 function deckValue(d){ let total=0; const arr=[]; for(const id in d.cards){ const c=card(id); if(!c) continue; const q=d.cards[id]; const p=c.price?parseFloat(c.price):0; total+=p*q; if(p>0) arr.push({name:c.name,price:p,q}); } arr.sort((a,b)=>b.price-a.price); return {total, top:arr.slice(0,6)}; }
+// Budget breakdown: full deck cost + just the cards you still need (not in your collection).
+function deckPriceBreakdown(d){
+  let total=0, need=0, priced=0, unpriced=0; const allNames=[], needNames=[];
+  const ids=Object.keys(d.cards).concat(d.commander?[d.commander]:[]);
+  ids.forEach(id=>{ const c=card(id); if(!c) return; const q = id===d.commander?1:d.cards[id]; const p=c.price?parseFloat(c.price):0;
+    if(p>0){ total+=p*q; priced+=q; } else unpriced+=q;
+    for(let i=0;i<q;i++) allNames.push(c.name);
+    const owned=state.collection[id]||0, miss=Math.max(0,q-owned);
+    if(miss>0){ if(p>0) need+=p*miss; for(let i=0;i<miss;i++) needNames.push(c.name); }
+  });
+  return {total, need, priced, unpriced, allNames, needNames};
+}
+// Open the selected seller with the whole deck (or just the cards you need) pre-loaded.
+function deckBuyAll(deckId, onlyMissing){
+  const d=state.decks.find(x=>x.id===deckId); if(!d) return;
+  const pb=deckPriceBreakdown(d); const names=onlyMissing?pb.needNames:pb.allNames;
+  if(!names.length){ toast(onlyMissing?'You already own every card':'Deck is empty'); return; }
+  const counts={}; names.forEach(n=>counts[n]=(counts[n]||0)+1);
+  const lines=Object.keys(counts).map(n=>counts[n]+' '+n);
+  if((state.buyStore==='ck'?'ck':'tcg')==='ck'){
+    window.open('https://www.cardkingdom.com/builder','_blank','noopener');
+    const list=lines.join('\n');
+    if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(list).then(()=>toast('List copied — paste it into Card Kingdom’s deck builder')).catch(()=>toast('Opened Card Kingdom'));
+    else toast('Opened Card Kingdom — paste your list');
+  } else {
+    window.open('https://www.tcgplayer.com/massentry?productline=Magic&c='+encodeURIComponent(lines.join('||')),'_blank','noopener');
+    toast('Opening your TCGplayer cart…');
+  }
+}
 function pipAnalysis(d){ const COLS=['W','U','B','R','G']; const demand={W:0,U:0,B:0,R:0,G:0}, sources={W:0,U:0,B:0,R:0,G:0};
   for(const id in d.cards){ const c=card(id); if(!c) continue; const q=d.cards[id];
     if(!/\bLand\b/.test(c.type_line||'')){ const mc=c.mana_cost||''; COLS.forEach(col=>{ const m=mc.match(new RegExp('\\{[^}]*'+col+'[^}]*\\}','g')); if(m) demand[col]+=m.length*q; }); }
@@ -1888,14 +1935,14 @@ function startGame(deckId){
   enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[]));
 }
 async function enrichGameCards(ids){
-  const missing=[...new Set(ids)].filter(id=>state.cards[id] && (state.cards[id].text===undefined || state.cards[id].power===undefined || state.cards[id].legal===undefined));
+  const missing=[...new Set(ids)].filter(id=>state.cards[id] && (state.cards[id].text===undefined || state.cards[id].power===undefined || state.cards[id].legal===undefined || state.cards[id].price===undefined));
   if(!missing.length) return;
   for(let i=0;i<missing.length;i+=75){
     const chunk=missing.slice(i,i+75);
     try{
       const r=await fetch('https://api.scryfall.com/cards/collection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifiers:chunk.map(id=>({id}))})});
       const d=await r.json();
-      (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); e.power=(c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null; e.toughness=(c.toughness!=null?c.toughness:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].toughness))||null; e.legal=c.legalities||e.legal||{}; } });
+      (d.data||[]).forEach(c=>{ const e=state.cards[c.id]; if(e){ e.produced=c.produced_mana||e.produced||[]; e.text=oracleText(c); e.power=(c.power!=null?c.power:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].power))||null; e.toughness=(c.toughness!=null?c.toughness:(c.card_faces&&c.card_faces[0]&&c.card_faces[0].toughness))||null; e.legal=c.legalities||e.legal||{}; e.price=(c.prices&&c.prices.usd)||e.price||null; } });
     }catch(e){}
   }
   DB.save(); render();
@@ -2840,7 +2887,7 @@ function renderFriends(){
 //  ACTIONS
 // ============================================================
 function setTab(t){ state.pickCommanderFor=null; state.addToDeckId=null; state.generateMode=false; state.tab=t; state.openDeckId=null; render(); if(t==='search') setTimeout(()=>$('#searchInput')?.focus(),50); }
-function openDeck(id){ state.openDeckId=id; render(); }
+function openDeck(id){ state.openDeckId=id; render(); const d=state.decks.find(x=>x.id===id); if(d) enrichGameCards(Object.keys(d.cards).concat(d.commander?[d.commander]:[])); }
 function closeDeck(){ state.openDeckId=null; render(); }
 
 // ---------- Commander slot ----------
@@ -3299,6 +3346,8 @@ function openDeckModal(editId){
         <input id="mDeckName" placeholder="e.g. Mono-Red Aggro" value="${d?esc(d.name):''}"></div>
       <div class="field"><label>Format</label>
         <select id="mDeckFormat">${formats.map(f=>`<option ${d&&d.format===f?'selected':''}>${f}</option>`).join('')}</select></div>
+      <div class="field"><label>Budget ($, optional)</label>
+        <input id="mDeckBudget" type="number" min="0" step="1" inputmode="decimal" placeholder="e.g. 100" value="${d&&d.budget?esc(String(d.budget)):''}"></div>
       <button class="btn gold full" onclick="saveDeck('${editId||''}')">${d?'Save':'Create deck'}</button>
       ${d?`<button class="btn danger full" style="margin-top:9px" onclick="deleteDeck('${editId}')">Delete deck</button>`:''}
       <button class="btn ghost full" style="margin-top:7px" onclick="closeModal()">Cancel</button>
@@ -3308,11 +3357,13 @@ function openDeckModal(editId){
 function saveDeck(editId){
   const name=$('#mDeckName').value.trim()||'Untitled Deck';
   const format=$('#mDeckFormat').value;
+  const braw=($('#mDeckBudget')&&$('#mDeckBudget').value)||'';
+  const budget=braw?Math.max(0,parseFloat(braw)||0):0;
   if(editId){
-    const d=state.decks.find(x=>x.id===editId); d.name=name; d.format=format;
+    const d=state.decks.find(x=>x.id===editId); d.name=name; d.format=format; d.budget=budget;
     DB.save(); closeModal(); render();
   } else {
-    const id=uid(); state.decks.push({id,name,format,cards:{}}); state.openDeckId=id;
+    const id=uid(); state.decks.push({id,name,format,budget,cards:{}}); state.openDeckId=id;
     DB.save(); closeModal();
     if(format==='Commander'){ startPickCommander(id); } else { render(); }
   }
@@ -3654,7 +3705,7 @@ Object.assign(window,{openDeckModal,saveDeck,deleteDeck,openDeck,closeDeck,deckQ
   setCollMode,addToWishlist,removeWishlist,setBuyStore,buyAllStore,
   openScanner,closeScanner,captureScan,scanConfirm,scanEdit,scanResearch,scanDismiss,scanAdd,
   startPickCommander,setCommander,removeCommander,cancelPickCommander,
-  startAddingTo,addToDeckDirect,finishAdding,upgradeSearch,
+  startAddingTo,addToDeckDirect,finishAdding,upgradeSearch,deckBuyAll,
   openImport,runImport,loadPrecon,openPasteCollection,runPasteCollection,mtgoFilePicked,openBgPicker,setBg,
   setCollFilter,clearCollFilter,selectAnalyzeDeck,closeAnalyze,setAnalyzeOwned,askDeckQ,askDeckQPreset,openAiSetup,saveAiUrl,clearAiUrl,loadCombos,loadMeta,openMetaDeck,closeMetaDeck,randomCommander,
   openShoppingList,
